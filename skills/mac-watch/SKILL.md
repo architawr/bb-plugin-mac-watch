@@ -19,7 +19,7 @@ power source and draw, network rate, and current alerts.
 Notes for answering:
 
 - The plugin samples every 15 seconds while BB runs and keeps 24 hours of history
-  locally. It reads only stock macOS tools and never uses sudo.
+  locally. Sampling reads only stock macOS tools and never uses sudo.
 - `power.batteryWatts` is negative while the battery drains. On AC power a
   negative value means the adapter is too weak (alert `ac-drain`).
 - `sleep.sleepDisabled` is the system-wide `pmset disablesleep` flag: with it the
