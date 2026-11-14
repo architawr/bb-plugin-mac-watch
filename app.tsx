@@ -3,7 +3,7 @@
 // live line charts with a dashed 100% guide, real app icons. Phone first.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode } from "react";
-import { definePluginApp, useRealtime, useRpc } from "@get-bb/plugin-sdk/app";
+import { definePluginApp, useBbNavigate, useRealtime, useRpc, type ExperimentalSidebarFooterDisclosureProps } from "@get-bb/plugin-sdk/app";
 import type { rpcContract } from "./server";
 import {
   awakeVerdict, formatBytes, formatDuration, formatMinutes, formatRate, ru,
@@ -953,6 +953,79 @@ function MacWatchPage() {
   );
 }
 
+// ---------- sidebar footer popover ----------
+
+/** Just the latest sample, kept live; the popover needs no history. */
+function useStatusOnly() {
+  const rpc = useRpc<typeof rpcContract>();
+  const [status, setStatus] = useState<Status | null>(null);
+  const read = useCallback(() => { rpc.call("status", null).then(setStatus, () => undefined); }, [rpc]);
+  useEffect(read, [read]);
+  useRealtime("sample", read);
+  return status;
+}
+
+function FooterRow({ label, value, bar, color, tone }: { label: string; value: ReactNode; bar?: number | null; color?: string; tone?: Tone }) {
+  return (
+    <div className="mwf-row">
+      <span className="mwf-label">{label}</span>
+      {bar !== undefined ? <Bar value={bar} color={color ?? "var(--mw-blue)"} /> : <span />}
+      <span className={`mwf-value ${tone ? `mw-text-${tone}` : ""}`}>{value}</span>
+    </div>
+  );
+}
+
+function MacWatchFooter({ dismiss }: ExperimentalSidebarFooterDisclosureProps) {
+  const status = useStatusOnly();
+  const navigate = useBbNavigate();
+  const now = useNow(5000);
+  const s = status?.snapshot ?? null;
+  const alerts = status?.alerts ?? [];
+  const age = s ? now - s.at : null;
+  const stale = age === null || age > (status?.intervalSec ?? 15) * 4000;
+  const m = s?.memory;
+  const memPct = m ? (m.used / m.total) * 100 : null;
+  const p = s?.power;
+  const soc = s?.temps?.soc ?? null;
+  const awake = s ? awakeVerdict(s.sleep) : null;
+  return (
+    <div className="mw mwf">
+      <div className="mwf-head">
+        <span className={`mw-dot ${stale ? "mw-dot-warn" : "mw-dot-good"}`} />
+        <strong>{s?.host.name ?? "Mac"}</strong>
+        <span className="mwf-age">{age === null ? "нет данных" : ago(age)}</span>
+      </div>
+      {!s ? <p className="mwf-empty">Загрузка…</p> : (
+        <>
+          {alerts.length > 0 ? (
+            <div className="mwf-alerts">
+              {alerts.slice(0, 3).map((a) => (
+                <div key={a.id} className={`mwf-alert mw-tone-${a.tone}`}><Glyph name="alert" size={13} />{a.title}</div>
+              ))}
+              {alerts.length > 3 && <div className="mwf-more-alerts">и ещё {alerts.length - 3}</div>}
+            </div>
+          ) : (
+            <div className="mwf-ok"><Glyph name="check" size={13} />Всё в порядке{awake?.tone === "good" ? " · не уснёт" : ""}</div>
+          )}
+          <FooterRow label="CPU" bar={s.cpu.usage} color="var(--mw-blue)" value={pct(s.cpu.usage)} />
+          <FooterRow label="Память" bar={memPct} color="var(--mw-teal)" value={pct(memPct)}
+            tone={m?.pressure === "critical" ? "bad" : m?.pressure === "warn" ? "warn" : undefined} />
+          <FooterRow label="Процессор" bar={soc == null ? null : Math.min(100, soc)} color="var(--mw-orange)"
+            value={soc == null ? "—" : `${Math.round(soc)} °C`} tone={tempTone(soc, 90, 100)} />
+          <FooterRow label="Питание" bar={p?.percent ?? null} color="var(--mw-green)"
+            value={!p ? "—" : `${p.percent ?? "—"}%${p.source === "ac" ? " ⚡" : ""}`}
+            tone={p?.source === "battery" ? ((p.percent ?? 100) <= 20 ? "bad" : "warn") : undefined} />
+          <FooterRow label="Диск" bar={s.disk ? (s.disk.used / s.disk.total) * 100 : null} color="var(--mw-orange)"
+            value={s.disk ? `${formatBytes(s.disk.free, 0)} св.` : "—"} />
+        </>
+      )}
+      <button type="button" className="mwf-open" onClick={() => { navigate.toPluginPanel("overview"); dismiss(); }}>
+        Открыть Mac Watch<Glyph name="chevron" size={12} />
+      </button>
+    </div>
+  );
+}
+
 export default definePluginApp((app) => {
   app.slots.navPanel({
     id: "overview",
@@ -960,5 +1033,12 @@ export default definePluginApp((app) => {
     icon: "Laptop",
     path: "overview",
     component: MacWatchPage,
+  });
+  app.experimental_sidebarFooter.register({
+    kind: "disclosure",
+    id: "mac",
+    label: "Mac Watch",
+    icon: "Laptop",
+    component: MacWatchFooter,
   });
 });
