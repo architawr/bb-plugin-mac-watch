@@ -27,6 +27,17 @@ Notes for answering:
   hold idle-sleep or display-sleep assertions; the plugin does not depend on any
   particular keep-awake app.
 - CPU of processes is percent of one core; helpers are grouped under their app.
+- Safety fields: `temps` (`soc`, `ssd`, `battery` °C from HID sensors, no root),
+  `thermalPressure` (0 nominal … 3+ critical), `batterySafety` (`permanentFailure`
+  non-zero = the battery controller reports a fault; `condition`; `cellSpreadMv`,
+  healthy is a few mV; `thermallyLimitedSec`; `lifetimeMaxC`), `disk.smart`,
+  `panics` (kernel panic times, last 7 days). Swelling cannot be measured directly.
+- Alerts are pushed to the user's phone through the push-notifications plugin
+  after they hold for two samples, then at most every 30 min (bad) or 3 h (warn).
+  An unexpected reboot shows up as alert `restart` for 24 h.
+- If the Mac dies, the plugin dies with it. Only the optional external watchdog
+  (setting `heartbeatUrl`, e.g. healthchecks.io, pinged every minute) can tell
+  the user then.
 
 ## Power actions
 

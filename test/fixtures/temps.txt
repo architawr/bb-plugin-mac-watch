@@ -1,0 +1,46 @@
+PMU tdie4	43.6
+PMU tdie12	43.6
+PMU tdev5	42.2
+gas gauge battery	32.0
+PMU2 tdie2	41.9
+PMU tdie10	43.2
+PMU tdie1	44.9
+PMU tdev3	36.5
+PMU2 tdie4	40.2
+PMU tdie13	43.3
+PMU tdie5	44.1
+PMU tcal	51.8
+PMU2 tdie6	40.7
+PMU tdev6	37.6
+PMU tdev4	42.2
+gas gauge battery	32.0
+PMU tdie11	43.9
+PMU2 tdie8	40.8
+PMU2 tcal	51.8
+PMU tdie2	43.6
+PMU tdie9	43.6
+PMU2 tdev2	41.0
+gas gauge battery	32.6
+PMU2 tdie1	42.1
+PMU2 tdie10	40.8
+PMU tdie6	45.7
+PMU tdev7	39.3
+gas gauge battery	32.6
+PMU2 tdie3	40.9
+PMU tdie3	44.1
+PMU2 tdie5	40.4
+PMU tdev1	-22.0
+PMU2 tdev3	-21.9
+NAND CH0 temp	39.0
+PMU2 tdev1	-21.9
+gas gauge battery	32.6
+PMU tdie7	44.6
+PMU tdie14	43.3
+PMU2 tdev4	44.1
+PMU2 tdie7	39.9
+PMU tdev8	40.4
+PMU tdev2	41.9
+gas gauge battery	32.0
+PMU tdie8	45.3
+PMU2 tdev5	42.0
+PMU2 tdie9	40.0

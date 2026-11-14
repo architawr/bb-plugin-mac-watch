@@ -16,6 +16,7 @@ bb plugin install "$PWD" --yes   # или bb plugin reload mac-watch
 
 - `core.ts`: чистые парсеры, предупреждения, вердикт «уснёт ли Мак», форматирование.
 - `collector.ts`: запускает утилиты macOS и собирает `Snapshot`.
+- `helpers/temps.c`: читает температурные датчики Apple Silicon через IOHID без root. Плагин сам компилирует её при старте (`xcrun clang`) в `.build/`. Если компилятора нет, температур просто не будет.
 - `icons.ts`: иконки приложений из `.app` через `sips`, с кэшем.
 - `power.ts`: погасить экран, сон (с таймером пробуждения) и выключение. Флаг `disablesleep` возвращается после настоящего пробуждения.
 - `sudoers/install.sh`: правило NOPASSWD только для `pmset disablesleep 0|1`, `pmset relative wake 3600|14400|28800` и `shutdown -h now`. Пользователь запускает его сам: `sh sudoers/install.sh`.

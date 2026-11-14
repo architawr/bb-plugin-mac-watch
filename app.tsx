@@ -101,6 +101,12 @@ const pct = (n: number | null | undefined) => (n == null ? "—" : `${Math.round
 // ---------- icons ----------
 
 const glyphs = {
+  thermo: <path d="M14 14.8V4a2 2 0 0 0-4 0v10.8a4 4 0 1 0 4 0Z" />,
+  chip: <><rect x="6" y="6" width="12" height="12" rx="2" /><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3" /></>,
+  drive: <><rect x="3" y="7" width="18" height="10" rx="2" /><path d="M7 12h.01M11 12h6" /></>,
+  shield: <><path d="M12 3 4 6v6c0 5 3.4 8.2 8 9 4.6-.8 8-4 8-9V6Z" /><path d="m9 12 2 2 4-4" /></>,
+  bell: <><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" /><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0" /></>,
+  pulse: <path d="M3 12h4l3-8 4 16 3-8h4" />,
   laptop: <><rect x="4" y="5" width="16" height="11" rx="1.5" /><path d="M2 19h20" /></>,
   cpu: <><rect x="6" y="6" width="12" height="12" rx="2" /><rect x="9.5" y="9.5" width="5" height="5" rx=".5" /><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3" /></>,
   bolt: <path d="M13 2 4 14h7l-1 8 9-12h-7z" />,
@@ -221,7 +227,8 @@ function LiveChart({ history, series, max, fill, format, height = 58, unit = 1 }
   const to = points.at(-1)?.at ?? 1;
   const x = (at: number) => (to === from ? W : ((at - from) / (to - from)) * W);
   const y = (v: number) => H - 2 - (Math.min(v, top) / top) * (H - 8);
-  const gap = (history?.bucketMs ?? 15_000) * 2.5;
+  // Restored history is stored per minute: only a gap of several minutes means the Mac slept.
+  const gap = Math.max(history?.bucketMs ?? 15_000, 60_000) * 2.5;
 
   const paths = series.map((s) => {
     let line = "";
@@ -469,8 +476,6 @@ function PowerPanel({ s, history }: { s: Snapshot; history: History | null }) {
         <Row label="Батарея" value={battery} tone={drain || (p?.source === "battery" && (p.percent ?? 100) <= 20) ? "warn" : undefined} />
         <Row label="Здоровье" value={p?.healthPct != null ? `${p.healthPct}%` : "—"} />
         <Row label="Циклы" value={p?.cycles ?? "—"} />
-        <Row label="Температура" value={p?.temperatureC != null ? `${ru(p.temperatureC, 1)} °C` : "—"}
-          tone={(p?.temperatureC ?? 0) >= 45 ? "warn" : undefined} />
         <div className="mw-chart-caption">Потребление, Вт</div>
         <LiveChart history={history} fill format={(v) => `${ru(v, 1)} Вт`}
           series={[{ field: "watts", color: "var(--mw-green)", name: "Ватты" }]} />
@@ -509,6 +514,105 @@ function AppsPanel({ top }: { top: Snapshot["top"] }) {
           {by === "cpu" ? "CPU в процентах одного ядра, " : ""}помощники собраны под своим приложением · раз в минуту
         </p>
       </div>
+    </Panel>
+  );
+}
+
+// ---------- safety ----------
+
+type SafetyStatus = {
+  notify: boolean;
+  lastPush: { at: number; title: string; channels: string[] } | null;
+  heartbeat: { configured: boolean; at: number | null; ok: boolean | null; error: string | null };
+};
+
+const PRESSURE_LABEL = ["Нормальное", "Умеренное", "Высокое", "Критическое", "Критическое"] as const;
+const tempTone = (v: number | null | undefined, warn: number, bad: number): Tone | undefined =>
+  v == null ? undefined : v >= bad ? "bad" : v >= warn ? "warn" : undefined;
+const deg = (v: number | null | undefined) => (v == null ? "—" : ru(v, 0));
+
+function SafetyPanel({ s, history }: { s: Snapshot; history: History | null }) {
+  const rpc = useRpc<typeof rpcContract>();
+  const [safety, setSafety] = useState<SafetyStatus | null>(null);
+  const [testing, setTesting] = useState<string | null>(null);
+  const read = useCallback(() => { rpc.call("safety_status", null).then(setSafety, () => undefined); }, [rpc]);
+  useEffect(read, [read]);
+  useEffect(() => {
+    const timer = setInterval(read, 60_000);
+    return () => clearInterval(timer);
+  }, [read]);
+
+  const t = s.temps;
+  const bs = s.batterySafety;
+  const p = s.power;
+  const pressure = s.thermalPressure;
+  const panic = s.panics?.[0];
+  const hb = safety?.heartbeat;
+  const batteryOk = !bs || (bs.permanentFailure === 0 && (!bs.condition || bs.condition === "Normal") && (bs.cellSpreadMv ?? 0) < 100);
+
+  return (
+    <Panel label="Безопасность">
+      <Sub title="Температуры">
+        <div className="mw-tiles mw-tiles-3">
+          <Tile icon={<Glyph name="chip" size={15} />} label="Процессор" tone={tempTone(t?.soc, 90, 100)}
+            value={<>{deg(t?.soc)}<small>°C</small></>} />
+          <Tile icon={<Glyph name="drive" size={15} />} label="SSD" tone={tempTone(t?.ssd, 60, 70)}
+            value={<>{deg(t?.ssd)}<small>°C</small></>} />
+          <Tile icon={<Glyph name="battery" size={15} />} label="Батарея" tone={tempTone(t?.battery ?? p?.temperatureC, 40, 50)}
+            value={<>{deg(t?.battery ?? p?.temperatureC)}<small>°C</small></>} />
+        </div>
+        <Row label="Тепловое давление macOS" value={pressure == null ? "—" : PRESSURE_LABEL[pressure] ?? String(pressure)}
+          tone={pressure == null ? undefined : pressure >= 3 ? "bad" : pressure >= 2 ? "warn" : "good"} />
+        <div className="mw-chart-caption">Процессор, °C</div>
+        <LiveChart history={history} format={(v) => `${ru(v, 0)} °C`} max={110}
+          series={[{ field: "soc", color: "var(--mw-orange)", name: "Процессор" }]} />
+      </Sub>
+
+      <Sub title="Батарея" action={<Badge tone={batteryOk ? "good" : "warn"}>{batteryOk ? "Исправна" : "Внимание"}</Badge>}>
+        <Row label="Неисправность (контроллер)" value={!bs ? "—" : bs.permanentFailure === 0 ? "Нет" : `Код ${bs.permanentFailure}`}
+          tone={bs && bs.permanentFailure !== 0 ? "bad" : undefined} />
+        <Row label="Состояние по macOS" value={!bs?.condition ? "—" : bs.condition === "Normal" ? "Норма" : bs.condition}
+          tone={bs?.condition && bs.condition !== "Normal" ? "warn" : undefined} />
+        <Row label="Разброс ячеек" value={bs?.cellSpreadMv == null ? "—" : `${bs.cellSpreadMv} мВ`}
+          tone={(bs?.cellSpreadMv ?? 0) >= 200 ? "bad" : (bs?.cellSpreadMv ?? 0) >= 100 ? "warn" : undefined} />
+        <Row label="Зарядка тормозилась от нагрева" value={bs?.thermallyLimitedSec == null ? "—" : bs.thermallyLimitedSec === 0 ? "Ни разу" : formatDuration(bs.thermallyLimitedSec)} />
+        <Row label="Максимум за всю жизнь" value={bs?.lifetimeMaxC == null ? "—" : `${bs.lifetimeMaxC} °C`} />
+        <p className="mw-caption mw-caption-quiet">Вздутие напрямую не измерить. Ранние признаки — неисправность, разброс ячеек, нагрев и рекомендация обслуживания.</p>
+      </Sub>
+
+      <Sub title="Система">
+        <Row label="SSD (SMART)" value={!s.disk?.smart ? "—" : s.disk.smart === "Verified" ? "В порядке" : s.disk.smart}
+          tone={s.disk?.smart && s.disk.smart !== "Verified" ? "bad" : undefined} />
+        <Row label="Kernel panic за 7 дней" value={panic ? `${s.panics.length}, последний ${dayTime(panic)}` : "Не было"}
+          tone={panic ? "warn" : undefined} />
+      </Sub>
+
+      <Sub title="Если что-то случится">
+        <Row label={<span className="mw-inline"><Glyph name="bell" size={14} />Пуш на телефон</span>}
+          value={!safety ? "—" : safety.notify ? "Включены" : "Выключены"} tone={safety?.notify ? "good" : "warn"} />
+        {safety?.lastPush && <Row sub label="Последний" value={`${safety.lastPush.title.replace(/^[^\p{L}\d]+/u, "")} · ${clock(safety.lastPush.at)}`} />}
+        <Row label={<span className="mw-inline"><Glyph name="pulse" size={14} />Внешний сторож</span>}
+          value={!hb ? "—" : !hb.configured ? "Не настроен" : hb.ok ? `Отметка ${clock(hb.at)}` : hb.at ? "Ошибка отметки" : "Ждёт отметки"}
+          tone={!hb ? undefined : !hb.configured ? "warn" : hb.ok === false ? "bad" : "good"} />
+        {hb && !hb.configured && (
+          <p className="mw-caption">Если Мак выключится, сгорит или потеряет сеть, плагин об этом не скажет — он умрёт вместе с Маком. Предупредить может только внешний сервис: создайте проверку в healthchecks.io с периодом 1–2 мин и вставьте её адрес в Settings → Mac Watch.</p>
+        )}
+        {hb?.error && <p className="mw-caption mw-text-bad">{hb.error}</p>}
+        <div className="mw-inline-actions">
+          <button type="button" className="mw-btn mw-btn-small" disabled={testing === "…"}
+            onClick={async () => {
+              setTesting("…");
+              try {
+                const r = await rpc.call("test_push", null);
+                setTesting(r.channels.length ? `Отправлено: ${r.channels.join(", ")}` : "Никуда не доставлено");
+              } catch (e) { setTesting(e instanceof Error ? e.message : String(e)); }
+              read();
+            }}>
+            Проверить уведомление
+          </button>
+          {testing && testing !== "…" && <span className="mw-caption">{testing}</span>}
+        </div>
+      </Sub>
     </Panel>
   );
 }
@@ -680,6 +784,7 @@ function MacWatchPage() {
             <Alerts alerts={status?.alerts ?? []} />
             <div className="mw-grid">
               <div className="mw-area-system"><SystemPanel s={s} history={history} range={range} setRange={setRange} /></div>
+              <div className="mw-area-safety"><SafetyPanel s={s} history={history} /></div>
               <div className="mw-area-power"><PowerPanel s={s} history={history} /></div>
               <div className="mw-area-apps"><AppsPanel top={s.top} /></div>
             </div>

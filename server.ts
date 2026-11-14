@@ -48,6 +48,15 @@ export const rpcContract = defineRpcContract({
     output: z.object({ ok: z.literal(true) }),
   },
   shutdown: { input: z.object({ confirm: z.literal("shutdown") }), output: z.object({ ok: z.literal(true) }) },
+  safety_status: {
+    input: z.null(),
+    output: z.object({
+      notify: z.boolean(),
+      lastPush: z.custom<{ at: number; title: string; channels: string[] }>().nullable(),
+      heartbeat: z.object({ configured: z.boolean(), at: z.number().nullable(), ok: z.boolean().nullable(), error: z.string().nullable() }),
+    }),
+  },
+  test_push: { input: z.null(), output: z.object({ channels: z.array(z.string()) }) },
   icons: {
     input: z.object({ apps: z.array(z.string().max(1024)).max(40) }),
     output: z.record(z.string(), z.string().nullable()),
@@ -62,9 +71,34 @@ const installScript = ["./sudoers/install.sh", "../sudoers/install.sh"]
   .map((rel) => decodeURIComponent(new URL(rel, import.meta.url).pathname))
   .find((path) => existsSync(path));
 const installCommand = installScript ? `sh '${installScript}'` : "sh <папка плагина>/sudoers/install.sh";
+const pluginFile = (rel: string) => [`./${rel}`, `../${rel}`]
+  .map((r) => decodeURIComponent(new URL(r, import.meta.url).pathname))
+  .find((path) => existsSync(path)) ?? null;
+
+const COOLDOWN_MS = { warn: 3 * 3600_000, bad: 30 * 60_000 } as const;
+const pushSchema = z.object({ ok: z.literal(true), channels: z.array(z.enum(["web", "desktop", "mobile"])) });
 
 export default async function plugin(bb: BbPluginApi) {
-  const collector = new Collector();
+  const settings = bb.settings.define({
+    notify: {
+      type: "boolean",
+      label: "Пуш-уведомления о проблемах",
+      description: "Перегрев, батарея, отключение от сети, диск, внезапная перезагрузка. Через плагин уведомлений BB.",
+      default: true,
+    },
+    heartbeatUrl: {
+      type: "string",
+      label: "Адрес внешнего сторожа",
+      description: "HTTPS-адрес, на который Мак раз в минуту шлёт GET, например https://hc-ping.com/<uuid> из healthchecks.io. Если отметки прекратятся (Мак выключился, сгорел, пропала сеть), сервис сам вас предупредит. Пусто — выключено.",
+      secret: true,
+      default: "",
+      experimental_schema: z.string().trim().regex(/^$|^https:\/\/\S+$/, "Нужен адрес https://…"),
+    },
+  });
+  let cfg = await settings.get();
+  settings.onChange((next) => { cfg = next; });
+
+  const collector = new Collector(pluginFile("helpers/temps.c"), (m) => bb.log.warn(m));
   let snapshot: Snapshot | null = null;
   let recent: Snapshot[] = [];
   let error: string | null = null;
@@ -86,9 +120,88 @@ export default async function plugin(bb: BbPluginApi) {
     await (next ? bb.storage.kv.set("pending-sleep", next) : bb.storage.kv.delete("pending-sleep"));
   };
 
+  // ---- notifications ----
+  let lastPush: { at: number; title: string; channels: string[] } | null =
+    (await bb.storage.kv.get<{ at: number; title: string; channels: string[] }>("last-push")) ?? null;
+  const notified: Record<string, number> = (await bb.storage.kv.get<Record<string, number>>("notified")) ?? {};
+  const streak = new Map<string, number>();
+
+  async function push(title: string, body: string): Promise<string[]> {
+    const { channels } = await bb.sdk.plugins.callRpc({
+      pluginId: "push-notifications",
+      method: "notifications.send",
+      input: { title, body },
+      outputSchema: pushSchema,
+    });
+    lastPush = { at: Date.now(), title, channels };
+    await bb.storage.kv.set("last-push", lastPush);
+    return channels;
+  }
+
+  /** Push an alert once it holds for two samples; repeat after a cooldown; say when it clears. */
+  async function notifyAlerts(alerts: Alert[]) {
+    const now = Date.now();
+    const live = new Set(alerts.map((a) => a.id));
+    for (const a of alerts) {
+      const n = (streak.get(a.id) ?? 0) + 1;
+      streak.set(a.id, n);
+      if (!cfg.notify || n < 2 || now - (notified[a.id] ?? 0) < COOLDOWN_MS[a.tone]) continue;
+      notified[a.id] = now;
+      await push(`${a.tone === "bad" ? "🔴" : "🟠"} ${a.title}`, a.detail).catch((e) => bb.log.warn(`push failed: ${e}`));
+    }
+    for (const [id, n] of streak) {
+      if (live.has(id)) continue;
+      streak.delete(id);
+      // Only serious problems and power cuts get an all-clear; flapping warnings stay quiet
+      // and keep their cooldown, so they cannot spam.
+      const meta = alertMeta.get(id);
+      if (cfg.notify && n >= 2 && notified[id] && (meta?.tone === "bad" || id === "on-battery")) {
+        await push("✅ Снова в норме", meta?.title ?? id).catch((e) => bb.log.warn(`push failed: ${e}`));
+      }
+    }
+    for (const a of alerts) alertMeta.set(a.id, { title: a.title, tone: a.tone });
+    await bb.storage.kv.set("notified", notified);
+  }
+  const alertMeta = new Map<string, { title: string; tone: Alert["tone"] }>();
+
+  // ---- unexpected restarts ----
+  let restart: Alert | null = null;
+  {
+    const bootAt = Date.now() - (await import("node:os")).uptime() * 1000;
+    const lastBoot = await bb.storage.kv.get<number>("last-boot");
+    const shutdownAt = await bb.storage.kv.get<number>("shutdown-requested");
+    if (lastBoot && Math.abs(bootAt - lastBoot) > 120_000) {
+      const planned = shutdownAt && shutdownAt > lastBoot && shutdownAt < bootAt;
+      if (!planned) {
+        restart = {
+          id: "restart",
+          tone: "warn",
+          title: "Мак перезагрузился сам",
+          detail: `Загрузка в ${new Date(bootAt).toLocaleString("ru-RU")}. Причиной может быть kernel panic, сбой питания или обновление macOS.`,
+        };
+      }
+    }
+    await bb.storage.kv.set("last-boot", bootAt);
+    if (restart) setTimeout(() => { restart = null; }, 24 * 3600_000).unref?.();
+  }
+
+  // ---- external watchdog ----
+  let beat: { at: number | null; ok: boolean | null; error: string | null } = { at: null, ok: null, error: null };
+  async function heartbeat() {
+    const url = cfg.heartbeatUrl.trim();
+    if (!url || (beat.at && Date.now() - beat.at < 60_000)) return;
+    beat = { ...beat, at: Date.now() };
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+      beat = { at: Date.now(), ok: res.ok, error: res.ok ? null : `HTTP ${res.status}` };
+    } catch (e) {
+      beat = { at: Date.now(), ok: false, error: e instanceof Error ? e.message : String(e) };
+    }
+  }
+
   const status = () => ({
     snapshot,
-    alerts: snapshot ? deriveAlerts(snapshot, recent.slice(0, -1)) : [],
+    alerts: [...(restart ? [restart] : []), ...(snapshot ? deriveAlerts(snapshot, recent.slice(0, -1)) : [])],
     error,
     intervalSec: INTERVAL_MS / 1000,
   });
@@ -110,6 +223,8 @@ export default async function plugin(bb: BbPluginApi) {
         error = null;
         bb.realtime.publish(SAMPLE_CHANNEL, { at: next.at });
         if (Date.now() - lastPersist > PERSIST_EVERY_MS) await persist();
+        await notifyAlerts(status().alerts).catch((e) => bb.log.warn(`notify failed: ${e}`));
+        void heartbeat();
         if (pending) {
           const settled = await power.settleAfterSleep(pending).catch((e: unknown) => `Не удалось вернуть запрет сна: ${e instanceof Error ? e.message : e}`);
           if (settled) {
@@ -151,7 +266,16 @@ export default async function plugin(bb: BbPluginApi) {
       await logPower(wakeHours ? `Мак засыпает, проснётся через ${wakeHours} ч.` : "Мак засыпает.");
       return { ok: true as const };
     },
+    safety_status: async () => ({
+      notify: cfg.notify,
+      lastPush,
+      heartbeat: { configured: cfg.heartbeatUrl.trim() !== "", ...beat },
+    }),
+    test_push: async () => ({
+      channels: await push("Mac Watch: проверка", "Так будут выглядеть предупреждения о вашем Маке."),
+    }),
     shutdown: async () => {
+      await bb.storage.kv.set("shutdown-requested", Date.now());
       await power.shutdown((m) => void logPower(`Выключение не удалось: ${m}`));
       await logPower("Мак выключается.");
       await persist().catch(() => undefined);
@@ -208,6 +332,7 @@ export default async function plugin(bb: BbPluginApi) {
       if (command === "sleep" || command === "shutdown") {
         if (!yes) return { exitCode: 1, stderr: `Это отключит Мак от BB. Повторите с --yes.\n${usage}` };
         if (command === "shutdown") {
+          await bb.storage.kv.set("shutdown-requested", Date.now());
           return power.shutdown((m) => void logPower(`Выключение не удалось: ${m}`))
             .then(async () => { await logPower("Мак выключается."); return { exitCode: 0, stdout: "Мак выключается через пару секунд." }; }, fail);
         }

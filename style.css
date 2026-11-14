@@ -92,11 +92,12 @@
 .mw-grid {
   display: grid; gap: 18px; align-items: start;
   grid-template-columns: minmax(0, 1.12fr) minmax(0, 1fr);
-  grid-template-areas: "system power" "apps power";
-  grid-template-rows: auto 1fr;
+  grid-template-areas: "system safety" "system power" "apps power";
+  grid-template-rows: auto auto 1fr;
 }
 .mw-area-system { grid-area: system; min-width: 0; }
 .mw-area-power { grid-area: power; min-width: 0; }
+.mw-area-safety { grid-area: safety; min-width: 0; }
 .mw-area-apps { grid-area: apps; min-width: 0; }
 
 /* ---------- panels ---------- */
@@ -292,7 +293,7 @@ img.mw-app-icon { object-fit: contain; }
 /* ---------- responsive ---------- */
 @media (max-width: 880px) {
   /* On a phone the first question is "is it awake and powered", then load, then apps. */
-  .mw-grid { grid-template-columns: minmax(0, 1fr); grid-template-areas: "power" "system" "apps"; grid-template-rows: none; }
+  .mw-grid { grid-template-columns: minmax(0, 1fr); grid-template-areas: "safety" "power" "system" "apps"; grid-template-rows: none; }
 }
 @media (max-width: 520px) {
   .mw-page { padding: 12px 12px 26px; gap: 14px; }
@@ -311,3 +312,13 @@ img.mw-app-icon { object-fit: contain; }
   .mw *, .mw *::before { animation: none !important; transition: none !important; }
 }
 .mw-sheet-icon.mw-tone-bad { --tone: var(--mw-bad); }
+
+/* ---------- safety ---------- */
+.mw-tiles-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.mw-tiles-3 .mw-tile-value { font-size: 22px; }
+.mw-tile.mw-tone-warn { --tone: var(--mw-warn); }
+.mw-tile.mw-tone-bad { --tone: var(--mw-bad); }
+.mw-inline { display: inline-flex; align-items: center; gap: 7px; }
+.mw-inline .mw-glyph { color: var(--mw-dim); }
+.mw-inline-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
+.mw-btn-small { min-height: 34px; padding: 0 14px; font-size: 13px; }

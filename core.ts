@@ -38,7 +38,7 @@ export type Snapshot = {
     swapTotal: number | null;
     pressure: "normal" | "warn" | "critical" | null;
   } | null;
-  disk: { total: number; free: number; used: number } | null;
+  disk: { total: number; free: number; used: number; smart: string | null } | null;
   power: {
     source: "ac" | "battery";
     percent: number | null;
@@ -66,12 +66,32 @@ export type Snapshot = {
     holders: SleepHolder[];
   } | null;
   thermal: { throttled: boolean; cpuSpeedLimit: number | null } | null;
+  /** macOS thermal pressure: 0 nominal, 1 moderate, 2 heavy, 3 trapping, 4 sleeping. */
+  thermalPressure: number | null;
+  /** Sensor temperatures in °C, read without root. */
+  temps: { soc: number | null; socAvg: number | null; ssd: number | null; battery: number | null } | null;
+  /** Battery signals that come before swelling or a fire. */
+  batterySafety: BatterySafety | null;
+  /** Kernel panic reports from the last 7 days, newest first (ms). */
+  panics: number[];
   top: { cpu: Proc[]; memory: Proc[] };
   /** Sources that failed in this sample, for a quiet footnote in the UI. */
   missing: string[];
 };
 
 export type Alert = { id: string; tone: Exclude<Tone, "good">; title: string; detail: string };
+
+export type BatterySafety = {
+  /** Non-zero means the battery's own controller reported a permanent failure. */
+  permanentFailure: number;
+  /** "Normal", "Service Recommended"… from System Information. */
+  condition: string | null;
+  cellsMv: number[];
+  cellSpreadMv: number | null;
+  /** Seconds macOS has limited charging because the battery was hot. */
+  thermallyLimitedSec: number | null;
+  lifetimeMaxC: number | null;
+};
 
 export type HistoryPoint = {
   at: number;
@@ -81,6 +101,7 @@ export type HistoryPoint = {
   tx: number | null;
   battery: number | null;
   watts: number | null;
+  soc?: number | null;
 };
 
 // ---------- small helpers ----------
@@ -350,7 +371,7 @@ export function deriveAlerts(s: Snapshot, recent: Snapshot[]): Alert[] {
   if (s.thermal?.throttled) {
     alerts.push({ id: "thermal", tone: "warn", title: "Мак перегревается", detail: "macOS снижает частоту процессора." });
   }
-  if (p?.temperatureC != null && p.temperatureC >= 45) {
+  if (p?.temperatureC != null && p.temperatureC >= 45 && p.temperatureC < 50) {
     alerts.push({ id: "battery-temp", tone: "warn", title: `Батарея нагрета до ${p.temperatureC}°`, detail: "Выше 45° она изнашивается быстрее." });
   }
   const sl = s.sleep;
@@ -369,7 +390,105 @@ export function deriveAlerts(s: Snapshot, recent: Snapshot[]): Alert[] {
       detail: `Никто не держит его бодрым: уснёт после ${sl.idleSleepMinutes} мин бездействия.`,
     });
   }
+  const t = s.temps;
+  const hot = [...recent, s].slice(-4);
+  if (t?.soc != null && t.soc >= 100) {
+    alerts.push({ id: "soc-hot", tone: "bad", title: `Процессор раскалён: ${Math.round(t.soc)} °C`, detail: "Это выше нормы даже под нагрузкой. Проверьте, чем занят Мак, и не лежит ли он на мягком." });
+  } else if (hot.length >= 4 && hot.every((x) => (x.temps?.soc ?? 0) >= 90)) {
+    alerts.push({ id: "soc-hot", tone: "warn", title: `Процессор долго горячий: ${Math.round(t!.soc!)} °C`, detail: "Больше минуты выше 90 °C." });
+  }
+  if ((s.thermalPressure ?? 0) >= 2) {
+    alerts.push({
+      id: "thermal-pressure",
+      tone: (s.thermalPressure ?? 0) >= 3 ? "bad" : "warn",
+      title: (s.thermalPressure ?? 0) >= 3 ? "Критический перегрев" : "Мак перегревается",
+      detail: "macOS сама сбрасывает частоты, чтобы остыть.",
+    });
+  }
+  const bs = s.batterySafety;
+  if (bs && bs.permanentFailure !== 0) {
+    alerts.push({ id: "battery-failure", tone: "bad", title: "Контроллер батареи сообщил о неисправности", detail: "Отключите Мак от сети и отнесите в сервис: это признак опасной батареи." });
+  }
+  if (bs?.condition && bs.condition !== "Normal") {
+    alerts.push({ id: "battery-condition", tone: "warn", title: `Батарея: ${bs.condition}`, detail: "macOS рекомендует обслуживание батареи." });
+  }
+  if (bs?.cellSpreadMv != null && bs.cellSpreadMv >= 100) {
+    alerts.push({
+      id: "battery-cells",
+      tone: bs.cellSpreadMv >= 200 ? "bad" : "warn",
+      title: `Разбаланс ячеек батареи: ${bs.cellSpreadMv} мВ`,
+      detail: "У здоровой батареи ячейки отличаются на единицы милливольт. Большой разброс — ранний признак деградации.",
+    });
+  }
+  const prevLimit = recent.at(-1)?.batterySafety?.thermallyLimitedSec;
+  if (bs?.thermallyLimitedSec != null && prevLimit != null && bs.thermallyLimitedSec > prevLimit) {
+    alerts.push({ id: "charge-hot", tone: "warn", title: "Зарядка ограничена из-за нагрева", detail: "Батарея слишком тёплая, macOS притормаживает зарядку." });
+  }
+  if (p?.temperatureC != null && p.temperatureC >= 50) {
+    alerts.push({ id: "battery-temp", tone: "bad", title: `Батарея горячая: ${p.temperatureC} °C`, detail: "Отключите зарядку. Выше 50 °C батарея рискует вздуться." });
+  }
+  if (s.disk?.smart && s.disk.smart !== "Verified") {
+    alerts.push({ id: "smart", tone: "bad", title: `Диск: SMART ${s.disk.smart}`, detail: "Накопитель сообщает о проблеме. Сделайте резервную копию." });
+  }
+  const panic = s.panics?.[0];
+  if (panic && s.at - panic < 24 * 3600_000) {
+    alerts.push({ id: "panic", tone: "warn", title: "Мак падал с kernel panic", detail: `Последний раз ${new Date(panic).toLocaleString("ru-RU")}. После паники Мак перезагружается сам.` });
+  }
   return alerts;
+}
+
+// ---------- safety sources ----------
+
+export function parseThermalPressure(text: string): number | null {
+  const v = /thermalpressurelevel (\d+)/.exec(text)?.[1];
+  return v === undefined ? null : Number(v);
+}
+
+/** `name\tcelsius` lines from helpers/temps.c. Dead sensors read negative or absurd values. */
+export function parseTemps(text: string): Snapshot["temps"] {
+  const soc: number[] = [];
+  const ssd: number[] = [];
+  const battery: number[] = [];
+  for (const line of text.split("\n")) {
+    const [name, raw] = line.split("\t");
+    const v = Number(raw);
+    if (!name || !Number.isFinite(v) || v <= 5 || v >= 130) continue;
+    if (/tdie/i.test(name)) soc.push(v);
+    else if (/NAND|SSD/i.test(name)) ssd.push(v);
+    else if (/gas gauge|battery/i.test(name)) battery.push(v);
+  }
+  const max = (a: number[]) => (a.length ? round(Math.max(...a), 1) : null);
+  if (!soc.length && !ssd.length && !battery.length) return null;
+  return {
+    soc: max(soc),
+    socAvg: soc.length ? round(soc.reduce((a, b) => a + b, 0) / soc.length, 1) : null,
+    ssd: max(ssd),
+    battery: max(battery),
+  };
+}
+
+export function parseBatterySafety(ioreg: string, condition: string | null): BatterySafety | null {
+  const failure = /"PermanentFailureStatus" = (\d+)/.exec(ioreg)?.[1];
+  if (failure === undefined) return null;
+  const cells = (/"CellVoltage"=\(([\d,]+)\)/.exec(ioreg)?.[1] ?? "").split(",").map(Number).filter((v) => v > 0);
+  const limited = /"TimeChargingThermallyLimited"=(\d+)/.exec(ioreg)?.[1];
+  const lifetimeMax = /"MaximumTemperature"=(\d+)/.exec(ioreg)?.[1];
+  return {
+    permanentFailure: Number(failure),
+    condition,
+    cellsMv: cells,
+    cellSpreadMv: cells.length > 1 ? Math.max(...cells) - Math.min(...cells) : null,
+    thermallyLimitedSec: limited === undefined ? null : Number(limited),
+    lifetimeMaxC: lifetimeMax === undefined ? null : Number(lifetimeMax),
+  };
+}
+
+export function parseCondition(systemProfiler: string): string | null {
+  return /Condition: (.+)/.exec(systemProfiler)?.[1]?.trim() ?? null;
+}
+
+export function parseSmart(diskutil: string): string | null {
+  return /SMART Status:\s+(.+)/.exec(diskutil)?.[1]?.trim() ?? null;
 }
 
 /** Will the Mac stay reachable? Read only from macOS state, no app-specific logic. */
@@ -439,6 +558,7 @@ export function toPoint(s: Snapshot): HistoryPoint {
     tx: s.network?.txBps ?? null,
     battery: s.power?.percent ?? null,
     watts: s.power?.systemWatts ?? null,
+    soc: s.temps?.soc ?? null,
   };
 }
 
@@ -453,7 +573,7 @@ export function downsample(points: HistoryPoint[], from: number, bucketMs: numbe
     list.push(p);
   }
   const avg = (list: HistoryPoint[], key: keyof Omit<HistoryPoint, "at">) => {
-    const values = list.map((p) => p[key]).filter((v): v is number => v !== null);
+    const values = list.map((p) => p[key]).filter((v): v is number => v != null);
     return values.length ? round(values.reduce((a, b) => a + b, 0) / values.length, 2) : null;
   };
   return [...buckets.entries()]
@@ -466,6 +586,7 @@ export function downsample(points: HistoryPoint[], from: number, bucketMs: numbe
       tx: avg(list, "tx"),
       battery: avg(list, "battery"),
       watts: avg(list, "watts"),
+      soc: avg(list, "soc"),
     }));
 }
 
