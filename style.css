@@ -89,20 +89,15 @@
 .mw-tone-good { --tone: var(--mw-good); }
 
 /* ---------- layout ---------- */
-.mw-grid {
-  display: grid; gap: 18px; align-items: start;
-  grid-template-columns: minmax(0, 1.12fr) minmax(0, 1fr);
-  grid-template-areas: "system safety" "apps power";
-  align-items: stretch;
-}
-.mw-area-system { grid-area: system; min-width: 0; }
-/* Panels in one row share its height. */
-.mw-grid > div { display: flex; flex-direction: column; }
-.mw-grid > div > .mw-panel-wrap { flex: 1; }
-.mw-grid > div > .mw-panel-wrap > .mw-panel { flex: 1; }
-.mw-area-power { grid-area: power; min-width: 0; }
-.mw-area-safety { grid-area: safety; min-width: 0; }
-.mw-area-apps { grid-area: apps; min-width: 0; }
+/* Desktop: two independent columns, so a short card never stretches to match its neighbour.
+   Only the last card of each column grows, to line the bottoms up. */
+.mw-cols { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 18px; align-items: stretch; }
+.mw-col { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+.mw-col > :last-child { flex: 1; display: flex; flex-direction: column; }
+.mw-col > :last-child > .mw-panel-wrap { flex: 1; }
+.mw-col > :last-child > .mw-panel-wrap > .mw-panel { flex: 1; }
+.mw-col > section, .mw-col > div { scroll-margin-top: 12px; }
+
 
 /* ---------- panels ---------- */
 .mw-panel-wrap { display: flex; flex-direction: column; gap: 9px; min-width: 0; }
@@ -282,10 +277,6 @@ img.mw-app-icon { object-fit: contain; }
 @keyframes mw-rise { from { opacity: 0; transform: translateY(12px) scale(.98); } }
 
 /* ---------- responsive ---------- */
-@media (max-width: 880px) {
-  /* On a phone the first question is "is it awake and powered", then load, then apps. */
-  .mw-grid { grid-template-columns: minmax(0, 1fr); grid-template-areas: "safety" "power" "system" "apps"; grid-template-rows: none; }
-}
 @media (max-width: 520px) {
   .mw-page { padding: 12px 12px 26px; gap: 14px; }
   .mw-panel { padding: 2px 14px; border-radius: 15px; }
@@ -406,19 +397,16 @@ img.mw-app-icon { object-fit: contain; }
 }
 .mw-btn-small { display: inline-flex; align-items: center; gap: 7px; }
 
-@media (max-width: 760px) {
-  .mw-header-extra { display: none; }
-  .mw-segmented button { min-height: 34px; padding: 0 12px; }
-  .mw-live-chart { --mw-chart-h: 76px !important; }
-  /* The tab already names the section; keep only its controls. */
-  .mw-panel-wrap > .mw-panel-label { min-height: 0; justify-content: flex-end; padding: 0; }
-  .mw-panel-wrap > .mw-panel-label > span { display: none; }
-  .mw-panel-wrap { gap: 8px; }
-  .mw-page { gap: 12px; }
-}
-@media (min-width: 761px) {
-  .mw-menu { width: min(400px, 100%); }
-}
+/* Compact = tabbed layout, decided by the pane width in JS (useCompact). */
+.mw-compact .mw-segmented button { min-height: 34px; padding: 0 12px; }
+.mw-compact .mw-live-chart { --mw-chart-h: 76px !important; }
+/* The tab already names the section; keep only its controls. */
+.mw-compact .mw-panel-wrap > .mw-panel-label { min-height: 0; justify-content: flex-end; padding: 0; }
+.mw-compact .mw-panel-wrap > .mw-panel-label > span { display: none; }
+.mw-compact .mw-panel-wrap { gap: 8px; }
+.mw-compact .mw-page { gap: 12px; max-width: 640px; }
+.mw:not(.mw-compact) .mw-menu { width: min(400px, 100%); }
+@media (max-width: 600px) { .mw-header-extra { display: none; } }
 
 /* ---------- sidebar footer popover ---------- */
 .mwf { height: auto; overflow: visible; display: flex; flex-direction: column; gap: 7px; padding: 10px 12px 8px; font-size: 13px; }
@@ -440,3 +428,5 @@ img.mw-app-icon { object-fit: contain; }
 }
 .mwf-open:hover { background: color-mix(in srgb, var(--foreground) 12%, var(--background)); }
 .mwf-empty { font-size: 12.5px; color: var(--mw-dim); }
+
+.mw-kpis.mw-kpis-wide { grid-template-columns: repeat(4, minmax(0, 1fr)); }

@@ -387,14 +387,14 @@ function KpiTile({ label, value, unit, note, tone, bar, color, onClick }: {
   );
 }
 
-function KpiGrid({ s, go }: { s: Snapshot; go: (t: Tab) => void }) {
+function KpiGrid({ s, go, wide }: { s: Snapshot; go: (t: Tab) => void; wide?: boolean }) {
   const m = s.memory;
   const memPct = m ? (m.used / m.total) * 100 : null;
   const p = s.power;
   const soc = s.temps?.soc ?? null;
   const pressure = m?.pressure;
   return (
-    <div className="mw-kpis">
+    <div className={`mw-kpis ${wide ? "mw-kpis-wide" : ""}`}>
       <KpiTile label="Процессор" value={s.cpu.usage == null ? "—" : Math.round(s.cpu.usage)} unit="%" bar={s.cpu.usage}
         color="var(--mw-blue)" note={`нагрузка ${ru(s.cpu.load[0], 1)}`} onClick={() => go("system")} />
       <KpiTile label="Память" value={memPct == null ? "—" : Math.round(memPct)} unit="%" bar={memPct} color="var(--mw-teal)"
@@ -572,11 +572,11 @@ function PowerPanel({ s, history }: { s: Snapshot; history: History | null }) {
   );
 }
 
-function AppsPanel({ top }: { top: Snapshot["top"] }) {
+function AppsPanel({ top, limit = 6 }: { top: Snapshot["top"]; limit?: number }) {
   const [by, setBy] = useState<"memory" | "cpu">("memory");
   const [all, setAll] = useState(false);
   const full: Proc[] = top[by];
-  const list = all ? full : full.slice(0, 6);
+  const list = all ? full : full.slice(0, limit);
   const icons = useIcons([...top.memory, ...top.cpu].map((p) => p.app));
   return (
     <Panel label="Приложения" action={
@@ -600,7 +600,7 @@ function AppsPanel({ top }: { top: Snapshot["top"] }) {
             })}
           </ol>
         )}
-        {full.length > 6 && (
+        {full.length > limit && (
           <button type="button" className="mw-more" onClick={() => setAll((a) => !a)}>
             {all ? "Свернуть" : `Показать все (${full.length})`}
           </button>
@@ -863,16 +863,22 @@ function PowerMenu({ s, onClose, onNote }: { s: Snapshot; onClose: () => void; o
   );
 }
 
-function useNarrow(query = "(max-width: 760px)") {
-  const [narrow, setNarrow] = useState(() => typeof window !== "undefined" && window.matchMedia(query).matches);
+/**
+ * Compact (tabbed) layout whenever the plugin's own pane is narrower than two
+ * comfortable columns: on a phone, and on a desktop squeezed by side panels.
+ */
+function useCompact(ref: React.RefObject<HTMLDivElement | null>, threshold = 860) {
+  const [compact, setCompact] = useState(() => typeof window !== "undefined" && window.innerWidth < threshold);
   useEffect(() => {
-    const mq = window.matchMedia(query);
-    const on = () => setNarrow(mq.matches);
-    on();
-    mq.addEventListener("change", on);
-    return () => mq.removeEventListener("change", on);
-  }, [query]);
-  return narrow;
+    const el = ref.current;
+    if (!el) return;
+    const measure = () => setCompact(el.clientWidth < threshold);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [ref, threshold]);
+  return compact;
 }
 
 const TABS: { value: Tab; label: string }[] = [
@@ -888,9 +894,10 @@ function MacWatchPage() {
   const [range, setRange] = useState<Range>(1);
   const { status, history, error } = useMacWatch(range);
   const now = useNow();
-  const narrow = useNarrow();
+
   const [tab, setTabState] = useState<Tab>(() => (localStorage.getItem("mac-watch-tab") as Tab | null) ?? "overview");
   const scroller = useRef<HTMLDivElement>(null);
+  const narrow = useCompact(scroller);
   const setTab = (t: Tab) => {
     setTabState(t);
     localStorage.setItem("mac-watch-tab", t);
@@ -903,7 +910,7 @@ function MacWatchPage() {
   const problem = error ?? status?.error ?? null;
 
   return (
-    <div className="mw" ref={scroller}>
+    <div className={`mw ${narrow ? "mw-compact" : ""}`} ref={scroller}>
       <div className="mw-page">
         <Header s={s} intervalSec={status?.intervalSec ?? 15} now={now} onPower={() => setMenu(true)} />
         {note && now - note.at < 60_000 && <p className="mw-note" role="status">{note.text}</p>}
@@ -938,11 +945,16 @@ function MacWatchPage() {
         ) : (
           <>
             <Verdict s={s} alerts={alerts} />
-            <div className="mw-grid">
-              <div className="mw-area-system"><SystemPanel s={s} history={history} range={range} setRange={setRange} /></div>
-              <div className="mw-area-safety"><SafetyPanel s={s} history={history} /></div>
-              <div className="mw-area-power"><PowerPanel s={s} history={history} /></div>
-              <div className="mw-area-apps"><AppsPanel top={s.top} /></div>
+            <KpiGrid s={s} wide go={(t) => document.getElementById(`mw-${t === "overview" ? "safety" : t}`)?.scrollIntoView({ behavior: "smooth", block: "start" })} />
+            <div className="mw-cols">
+              <div className="mw-col">
+                <div id="mw-system"><SystemPanel s={s} history={history} range={range} setRange={setRange} /></div>
+                <div id="mw-apps"><AppsPanel top={s.top} limit={12} /></div>
+              </div>
+              <div className="mw-col">
+                <div id="mw-safety"><SafetyPanel s={s} history={history} /></div>
+                <div id="mw-power"><PowerPanel s={s} history={history} /></div>
+              </div>
             </div>
           </>
         )}
