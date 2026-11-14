@@ -209,8 +209,10 @@ function niceMax(v: number) {
 }
 
 /** A thin live chart: dashed guide at the top, gaps where the Mac slept, hover for exact values. */
-function LiveChart({ history, series, max, fill, format, height = 58, unit = 1 }: {
+function LiveChart({ history, series, max, minTop = 0, fill, format, height = 64, unit = 1 }: {
   history: History | null; series: Series[]; max?: number; fill?: boolean; format: (v: number) => string; height?: number;
+  /** Lowest scale top, so a calm line does not look like a spike. */
+  minTop?: number;
   /** Round the scale in this unit, e.g. 1024 for byte rates. */
   unit?: number;
 }) {
@@ -222,7 +224,7 @@ function LiveChart({ history, series, max, fill, format, height = 58, unit = 1 }
   );
   const W = 400;
   const H = height;
-  const top = max ?? niceMax(Math.max(0, ...points.flatMap((p) => series.map((s) => p[s.field] ?? 0))) / unit) * unit;
+  const top = max ?? Math.max(minTop, niceMax(Math.max(0, ...points.flatMap((p) => series.map((s) => p[s.field] ?? 0))) / unit) * unit);
   const from = points[0]?.at ?? 0;
   const to = points.at(-1)?.at ?? 1;
   const x = (at: number) => (to === from ? W : ((at - from) / (to - from)) * W);
@@ -266,7 +268,9 @@ function LiveChart({ history, series, max, fill, format, height = 58, unit = 1 }
   const hp = hover !== null ? points[hover] ?? null : null;
 
   return (
-    <div className="mw-live-chart" ref={ref} style={{ height }} onPointerMove={pick} onPointerDown={pick} onPointerLeave={() => setHover(null)}>
+    <div className="mw-chart-wrap">
+    <div className="mw-live-chart" ref={ref} style={{ "--mw-chart-h": `${height}px` } as CSSProperties}
+      onPointerMove={pick} onPointerDown={pick} onPointerLeave={() => setHover(null)}>
       <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" aria-hidden="true">
         <defs>
           {paths.map((p) => (
@@ -284,7 +288,7 @@ function LiveChart({ history, series, max, fill, format, height = 58, unit = 1 }
         ))}
         {hp && <line x1={x(hp.at)} x2={x(hp.at)} y1="0" y2={H} className="mw-cursor" vectorEffect="non-scaling-stroke" />}
       </svg>
-      <span className="mw-guide-label" style={{ top: y(top) }}>{max === 100 ? "100%" : format(top)}</span>
+      <span className="mw-guide-label" style={{ top: `${(y(top) / H) * 100}%` }}>{max === 100 ? "100%" : format(top)}</span>
       {hp && (
         <div className="mw-tip" style={{ left: `${(x(hp.at) / W) * 100}%` }}>
           <span>{clock(hp.at)}</span>
@@ -292,6 +296,10 @@ function LiveChart({ history, series, max, fill, format, height = 58, unit = 1 }
         </div>
       )}
       {points.length < 2 && <span className="mw-chart-wait">Копится история…</span>}
+    </div>
+    {points.length >= 2 && (
+      <div className="mw-chart-axis" aria-hidden="true"><span>{clock(from)}</span><span>сейчас</span></div>
+    )}
     </div>
   );
 }
@@ -314,21 +322,21 @@ function UsageRow({ label, badge, value, text, color, open, onToggle, children }
 
 // ---------- sections ----------
 
-function Header({ s, intervalSec, now, onRefresh }: { s: Snapshot | null; intervalSec: number; now: number; onRefresh: () => Promise<void> }) {
-  const [spinning, setSpinning] = useState(false);
+function Header({ s, intervalSec, now, onPower }: { s: Snapshot | null; intervalSec: number; now: number; onPower: () => void }) {
   const age = s ? now - s.at : null;
   const stale = age === null || age > intervalSec * 4000;
   return (
     <header className="mw-header">
-      <div className="mw-header-icon"><Glyph name="laptop" size={20} /></div>
       <div className="mw-header-text">
         <h1>{s?.host.name ?? "Mac"}</h1>
-        <p>{s ? `${s.host.os} · работает ${formatDuration(s.host.uptimeSec)}` : "Подключаюсь…"}</p>
+        <p>
+          <span className={`mw-dot ${stale ? "mw-dot-warn" : "mw-dot-good"}`} />
+          {age === null ? "Нет данных" : stale ? `Нет связи · ${ago(age)}` : `Онлайн · ${ago(age)}`}
+          {s && <span className="mw-header-extra">· {s.host.os} · работает {formatDuration(s.host.uptimeSec)}</span>}
+        </p>
       </div>
-      <Badge tone={stale ? "warn" : "good"}>{age === null ? "Нет данных" : stale ? `Нет связи · ${ago(age)}` : ago(age)}</Badge>
-      <button type="button" className="mw-icon-button" aria-label="Обновить сейчас" disabled={spinning}
-        onClick={async () => { setSpinning(true); await onRefresh(); setSpinning(false); }}>
-        <Glyph name="refresh" size={15} className={spinning ? "mw-spin" : ""} />
+      <button type="button" className="mw-power-button" aria-label="Питание: экран, сон, выключение" onClick={onPower} disabled={!s}>
+        <Glyph name="power" size={18} />
       </button>
     </header>
   );
@@ -347,6 +355,90 @@ function Alerts({ alerts }: { alerts: Alert[] }) {
     </div>
   );
 }
+
+/** "Is everything fine?" in one card: the answer, then the problems if any. */
+function Verdict({ s, alerts }: { s: Snapshot; alerts: Alert[] }) {
+  const awake = awakeVerdict(s.sleep);
+  const p = s.power;
+  if (alerts.length > 0) return <Alerts alerts={alerts} />;
+  return (
+    <div className="mw-ok">
+      <span className="mw-ok-icon"><Glyph name="check" size={16} /></span>
+      <div>
+        <strong>Всё в порядке</strong>
+        <span>{awake.title}{p ? ` · ${p.source === "ac" ? "от сети" : "от батареи"}` : ""}</span>
+      </div>
+    </div>
+  );
+}
+
+type Tab = "overview" | "system" | "power" | "apps";
+
+function KpiTile({ label, value, unit, note, tone, bar, color, onClick }: {
+  label: string; value: ReactNode; unit?: string; note?: ReactNode; tone?: Tone; bar?: number | null; color: string; onClick: () => void;
+}) {
+  return (
+    <button type="button" className={`mw-kpi ${tone ? `mw-tone-${tone}` : ""}`} onClick={onClick}>
+      <span className="mw-kpi-label">{label}<Glyph name="chevron" size={12} /></span>
+      <span className="mw-kpi-value">{value}{unit && <small>{unit}</small>}</span>
+      {bar !== undefined && <Bar value={bar} color={color} />}
+      {note && <span className="mw-kpi-note">{note}</span>}
+    </button>
+  );
+}
+
+function KpiGrid({ s, go }: { s: Snapshot; go: (t: Tab) => void }) {
+  const m = s.memory;
+  const memPct = m ? (m.used / m.total) * 100 : null;
+  const p = s.power;
+  const soc = s.temps?.soc ?? null;
+  const pressure = m?.pressure;
+  return (
+    <div className="mw-kpis">
+      <KpiTile label="Процессор" value={s.cpu.usage == null ? "—" : Math.round(s.cpu.usage)} unit="%" bar={s.cpu.usage}
+        color="var(--mw-blue)" note={`нагрузка ${ru(s.cpu.load[0], 1)}`} onClick={() => go("system")} />
+      <KpiTile label="Память" value={memPct == null ? "—" : Math.round(memPct)} unit="%" bar={memPct} color="var(--mw-teal)"
+        tone={pressure === "critical" ? "bad" : pressure === "warn" ? "warn" : undefined}
+        note={pressure === "critical" ? "давление критическое" : pressure === "warn" ? "давление высокое" : "давление в норме"}
+        onClick={() => go("system")} />
+      <KpiTile label="Температура" value={soc == null ? "—" : Math.round(soc)} unit="°C" color="var(--mw-orange)"
+        bar={soc == null ? null : Math.min(100, soc)} tone={tempTone(soc, 90, 100)}
+        note={(s.thermalPressure ?? 0) >= 2 ? "macOS тормозит процессор" : "процессор"} onClick={() => go("overview")} />
+      <KpiTile label="Питание" value={p?.percent ?? "—"} unit="%" color="var(--mw-green)" bar={p?.percent ?? null}
+        tone={p?.source === "battery" ? ((p.percent ?? 100) <= 20 ? "bad" : "warn") : undefined}
+        note={!p ? "—" : `${p.source === "ac" ? "сеть" : "батарея"}${p.systemWatts != null ? ` · ${ru(p.systemWatts, 0)} Вт` : ""}`}
+        onClick={() => go("power")} />
+    </div>
+  );
+}
+
+/** A one-line summary that opens into details; opens by itself when something is wrong. */
+function Disclosure({ title, badge, problem, children }: { title: string; badge: ReactNode; problem: boolean; children: ReactNode }) {
+  const [open, setOpen] = useState(problem);
+  useEffect(() => { if (problem) setOpen(true); }, [problem]);
+  return (
+    <div className="mw-disclosure">
+      <button type="button" className="mw-disclosure-head" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        <span>{title}</span>
+        {badge}
+        <Glyph name="chevron" size={13} className={`mw-chevron ${open ? "mw-chevron-open" : ""}`} />
+      </button>
+      {open && <div className="mw-disclosure-body">{children}</div>}
+    </div>
+  );
+}
+
+/** Human names for processes that only have a bundle id. */
+const FRIENDLY: Record<string, string> = {
+  "com.apple.Virtualization.VirtualMachine": "Виртуальная машина",
+  "com.apple.WebKit.WebContent": "Safari: вкладки",
+  "com.apple.WebKit.GPU": "Safari: графика",
+  "com.apple.WebKit.Networking": "Safari: сеть",
+  "com.apple.quicklook.ThumbnailsAgent": "Миниатюры Quick Look",
+  "com.apple.SafariPlatformSupport.Helper": "Safari: помощник",
+};
+const displayName = (name: string) =>
+  FRIENDLY[name] ?? (name.startsWith("com.apple.") ? name.split(".").slice(2).join(" ") : name);
 
 function SystemPanel({ s, history, range, setRange }: { s: Snapshot; history: History | null; range: Range; setRange: (r: Range) => void }) {
   const [open, setOpen] = useState({ cpu: true, memory: true, network: true });
@@ -375,7 +467,7 @@ function SystemPanel({ s, history, range, setRange }: { s: Snapshot; history: Hi
         </UsageRow>
         <UsageRow label="Сеть" value={null} color="var(--mw-cyan)" open={open.network} onToggle={() => toggle("network")}
           text={<span className="mw-net"><Glyph name="arrowDown" size={11} />{formatRate(s.network?.rxBps)}<Glyph name="arrowUp" size={11} />{formatRate(s.network?.txBps)}</span>}>
-          <LiveChart history={history} format={formatRate} unit={1024}
+          <LiveChart history={history} format={formatRate} unit={1024} minTop={1024 * 1024}
             series={[{ field: "rx", color: "var(--mw-cyan)", name: "Входящий" }, { field: "tx", color: "var(--mw-pink)", name: "Исходящий" }]} />
         </UsageRow>
       </Sub>
@@ -473,9 +565,7 @@ function PowerPanel({ s, history }: { s: Snapshot; history: History | null }) {
         </div>
         <Row label="Источник" value={!p ? "—" : p.source === "ac" ? `Сеть${p.adapterWatts ? `, адаптер ${p.adapterWatts} Вт` : ""}` : "Батарея"} />
         <Row label="Батарея" value={battery} tone={drain || (p?.source === "battery" && (p.percent ?? 100) <= 20) ? "warn" : undefined} />
-        <Row label="Здоровье" value={p?.healthPct != null ? `${p.healthPct}%` : "—"} />
-        <Row label="Циклы" value={p?.cycles ?? "—"} />
-        <LiveChart history={history} fill format={(v) => `${ru(v, 1)} Вт`}
+        <LiveChart history={history} fill minTop={10} format={(v) => `${ru(v, 0)} Вт`}
           series={[{ field: "watts", color: "var(--mw-green)", name: "Ватты" }]} />
       </Sub>
     </Panel>
@@ -484,7 +574,9 @@ function PowerPanel({ s, history }: { s: Snapshot; history: History | null }) {
 
 function AppsPanel({ top }: { top: Snapshot["top"] }) {
   const [by, setBy] = useState<"memory" | "cpu">("memory");
-  const list: Proc[] = top[by];
+  const [all, setAll] = useState(false);
+  const full: Proc[] = top[by];
+  const list = all ? full : full.slice(0, 6);
   const icons = useIcons([...top.memory, ...top.cpu].map((p) => p.app));
   return (
     <Panel label="Приложения" action={
@@ -501,12 +593,17 @@ function AppsPanel({ top }: { top: Snapshot["top"] }) {
                   {icon ? <img src={icon} alt="" className="mw-app-icon" />
                     : p.app ? <span className="mw-letter mw-app-icon">{p.name.slice(0, 1).toUpperCase()}</span>
                     : <span className="mw-app-icon mw-app-exec"><Glyph name="terminal" size={14} /></span>}
-                  <span className="mw-app-name" title={p.name}>{p.name}</span>
+                  <span className="mw-app-name" title={p.name}>{displayName(p.name)}</span>
                   <span className="mw-app-value">{by === "cpu" ? `${ru(p.cpu, 1)}%` : formatBytes(p.memory, p.memory >= 1024 ** 3 ? 2 : 1)}</span>
                 </li>
               );
             })}
           </ol>
+        )}
+        {full.length > 6 && (
+          <button type="button" className="mw-more" onClick={() => setAll((a) => !a)}>
+            {all ? "Свернуть" : `Показать все (${full.length})`}
+          </button>
         )}
       </div>
     </Panel>
@@ -525,42 +622,42 @@ const tempTone = (v: number | null | undefined, warn: number, bad: number): Tone
   v == null ? undefined : v >= bad ? "bad" : v >= warn ? "warn" : undefined;
 const deg = (v: number | null | undefined) => (v == null ? "—" : ru(v, 0));
 
-function SafetyPanel({ s, history }: { s: Snapshot; history: History | null }) {
+function useSafety() {
   const rpc = useRpc<typeof rpcContract>();
   const [safety, setSafety] = useState<SafetyStatus | null>(null);
-  const [testing, setTesting] = useState<string | null>(null);
   const read = useCallback(() => { rpc.call("safety_status", null).then(setSafety, () => undefined); }, [rpc]);
   useEffect(read, [read]);
-  useEffect(() => {
-    const timer = setInterval(read, 60_000);
-    return () => clearInterval(timer);
-  }, [read]);
+  return { rpc, safety, read };
+}
 
+function TempsSection({ s, history, compact }: { s: Snapshot; history: History | null; compact?: boolean }) {
   const t = s.temps;
-  const bs = s.batterySafety;
-  const p = s.power;
   const pressure = s.thermalPressure;
-  const panic = s.panics?.[0];
-  const batteryOk = !bs || (bs.permanentFailure === 0 && (!bs.condition || bs.condition === "Normal") && (bs.cellSpreadMv ?? 0) < 100);
-
   return (
-    <Panel label="Безопасность">
-      <Sub title="Температуры">
-        <div className="mw-tiles mw-tiles-3">
-          <Tile icon={<Glyph name="chip" size={15} />} label="Процессор" tone={tempTone(t?.soc, 90, 100)}
-            value={<>{deg(t?.soc)}<small>°C</small></>} />
-          <Tile icon={<Glyph name="drive" size={15} />} label="SSD" tone={tempTone(t?.ssd, 60, 70)}
-            value={<>{deg(t?.ssd)}<small>°C</small></>} />
-          <Tile icon={<Glyph name="battery" size={15} />} label="Батарея" tone={tempTone(t?.battery ?? p?.temperatureC, 40, 50)}
-            value={<>{deg(t?.battery ?? p?.temperatureC)}<small>°C</small></>} />
-        </div>
-        <Row label="Тепловое давление" value={pressure == null ? "—" : PRESSURE_LABEL[pressure] ?? String(pressure)}
-          tone={pressure == null ? undefined : pressure >= 3 ? "bad" : pressure >= 2 ? "warn" : "good"} />
-        <LiveChart history={history} format={(v) => `${ru(v, 0)} °C`} max={110}
-          series={[{ field: "soc", color: "var(--mw-orange)", name: "Процессор" }]} />
-      </Sub>
+    <Sub title="Температуры" action={pressure == null ? undefined : (
+      <Badge tone={pressure >= 3 ? "bad" : pressure >= 2 ? "warn" : "good"}>{PRESSURE_LABEL[pressure] ?? String(pressure)}</Badge>
+    )}>
+      <div className={`mw-tiles ${compact ? "" : "mw-tiles-3"}`}>
+        {!compact && <Tile icon={<Glyph name="chip" size={14} />} label="Процессор" tone={tempTone(t?.soc, 90, 100)} value={<>{deg(t?.soc)}<small>°C</small></>} />}
+        <Tile icon={<Glyph name="drive" size={14} />} label="SSD" tone={tempTone(t?.ssd, 60, 70)} value={<>{deg(t?.ssd)}<small>°C</small></>} />
+        <Tile icon={<Glyph name="battery" size={14} />} label="Батарея" tone={tempTone(t?.battery ?? s.power?.temperatureC, 40, 50)}
+          value={<>{deg(t?.battery ?? s.power?.temperatureC)}<small>°C</small></>} />
+      </div>
+      <LiveChart history={history} format={(v) => `${ru(v, 0)} °C`} minTop={60}
+        series={[{ field: "soc", color: "var(--mw-orange)", name: "Процессор" }]} />
+    </Sub>
+  );
+}
 
-      <Sub title="Батарея" action={<Badge tone={batteryOk ? "good" : "warn"}>{batteryOk ? "Исправна" : "Внимание"}</Badge>}>
+function HealthSection({ s }: { s: Snapshot }) {
+  const bs = s.batterySafety;
+  const panic = s.panics?.[0];
+  const batteryBad = !!bs && (bs.permanentFailure !== 0 || (!!bs.condition && bs.condition !== "Normal") || (bs.cellSpreadMv ?? 0) >= 100);
+  const systemBad = (!!s.disk?.smart && s.disk.smart !== "Verified") || !!panic;
+  return (
+    <Sub title="Здоровье">
+      <Disclosure title="Батарея" problem={batteryBad}
+        badge={<Badge tone={batteryBad ? "warn" : "good"}>{batteryBad ? "Внимание" : "Исправна"}</Badge>}>
         <Row label="Неисправность" value={!bs ? "—" : bs.permanentFailure === 0 ? "Нет" : `Код ${bs.permanentFailure}`}
           tone={bs && bs.permanentFailure !== 0 ? "bad" : undefined} />
         <Row label="Состояние" value={!bs?.condition ? "—" : bs.condition === "Normal" ? "Норма" : bs.condition}
@@ -569,33 +666,48 @@ function SafetyPanel({ s, history }: { s: Snapshot; history: History | null }) {
           tone={(bs?.cellSpreadMv ?? 0) >= 200 ? "bad" : (bs?.cellSpreadMv ?? 0) >= 100 ? "warn" : undefined} />
         <Row label="Перегрев при зарядке" value={bs?.thermallyLimitedSec == null ? "—" : bs.thermallyLimitedSec === 0 ? "Не было" : formatDuration(bs.thermallyLimitedSec)} />
         <Row label="Пик температуры" value={bs?.lifetimeMaxC == null ? "—" : `${bs.lifetimeMaxC} °C`} />
-      </Sub>
-
-      <Sub title="Система">
+        <Row label="Ёмкость" value={s.power?.healthPct != null ? `${s.power.healthPct}%` : "—"} />
+        <Row label="Циклы" value={s.power?.cycles ?? "—"} />
+      </Disclosure>
+      <Disclosure title="Диск и стабильность" problem={systemBad}
+        badge={<Badge tone={systemBad ? "warn" : "good"}>{systemBad ? "Внимание" : "В порядке"}</Badge>}>
         <Row label="SSD (SMART)" value={!s.disk?.smart ? "—" : s.disk.smart === "Verified" ? "В порядке" : s.disk.smart}
           tone={s.disk?.smart && s.disk.smart !== "Verified" ? "bad" : undefined} />
         <Row label="Kernel panic, 7 дней" value={panic ? `${s.panics.length}, последний ${dayTime(panic)}` : "Не было"}
           tone={panic ? "warn" : undefined} />
-      </Sub>
+      </Disclosure>
+    </Sub>
+  );
+}
 
-      <Sub title="Уведомления">
-        <Row label={<span className="mw-inline"><Glyph name="bell" size={14} />Пуш на телефон</span>}
-          value={!safety ? "—" : safety.notify ? "Включены" : "Выключены"} tone={safety?.notify ? "good" : "warn"} />
-        <div className="mw-inline-actions">
-          <button type="button" className="mw-btn mw-btn-small" disabled={testing === "…"}
-            onClick={async () => {
-              setTesting("…");
-              try {
-                const r = await rpc.call("test_push", null);
-                setTesting(r.channels.length ? `Отправлено: ${r.channels.join(", ")}` : "Никуда не доставлено");
-              } catch (e) { setTesting(e instanceof Error ? e.message : String(e)); }
-              read();
-            }}>
-            Проверить уведомление
-          </button>
-          {testing && testing !== "…" && <span className="mw-caption">{testing}</span>}
-        </div>
-      </Sub>
+function NotifySection() {
+  const { rpc, safety } = useSafety();
+  const [testing, setTesting] = useState<string | null>(null);
+  return (
+    <Sub title="Уведомления" action={<Badge tone={safety?.notify ? "good" : "muted"}>{!safety ? "—" : safety.notify ? "Включены" : "Выключены"}</Badge>}>
+      <div className="mw-inline-actions">
+        <button type="button" className="mw-btn mw-btn-small" disabled={testing === "…"}
+          onClick={async () => {
+            setTesting("…");
+            try {
+              const r = await rpc.call("test_push", null);
+              setTesting(r.channels.length ? "Отправлено" : "Не доставлено");
+            } catch (e) { setTesting(e instanceof Error ? e.message : String(e)); }
+          }}>
+          <Glyph name="bell" size={14} />Проверить пуш
+        </button>
+        {testing && testing !== "…" && <span className="mw-caption">{testing}</span>}
+      </div>
+    </Sub>
+  );
+}
+
+function SafetyPanel({ s, history }: { s: Snapshot; history: History | null }) {
+  return (
+    <Panel label="Безопасность">
+      <TempsSection s={s} history={history} />
+      <HealthSection s={s} />
+      <NotifySection />
     </Panel>
   );
 }
@@ -711,61 +823,121 @@ function ConfirmSheet({ action, s, power, onClose, onDone }: {
   );
 }
 
-function Controls({ s }: { s: Snapshot }) {
+/** The power menu: a sheet from the bottom, within thumb reach. */
+function PowerMenu({ s, onClose, onNote }: { s: Snapshot; onClose: () => void; onNote: (text: string) => void }) {
   const { rpc, power, read } = usePower();
-  const [sheet, setSheet] = useState<Action | null>(null);
-  const [flash, setFlash] = useState<string | null>(null);
+  const [confirm, setConfirm] = useState<Action | null>(null);
   const [busy, setBusy] = useState(false);
-  const show = (text: string) => { setFlash(text); read(); };
-  const note = flash ?? (power?.note && Date.now() - power.note.at < 6 * 3600_000 ? `${power.note.text} · ${clock(power.note.at)}` : null);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  if (confirm && power) {
+    return <ConfirmSheet action={confirm} s={s} power={power} onClose={onClose} onDone={(text) => { onNote(text); read(); onClose(); }} />;
+  }
   return (
-    <section className="mw-controls" aria-label="Управление Маком">
-      <div className="mw-control-row">
-        <button type="button" className="mw-control" disabled={busy}
+    <div className="mw-sheet-backdrop" onClick={onClose}>
+      <div className="mw-sheet mw-menu" role="dialog" aria-modal="true" aria-label="Питание" onClick={(e) => e.stopPropagation()}>
+        <div className="mw-sheet-grip" />
+        <button type="button" className="mw-menu-item" disabled={busy}
           onClick={async () => {
             setBusy(true);
-            try { await rpc.call("display_off", null); show("Экран погашен."); } catch (e) { show(e instanceof Error ? e.message : String(e)); }
-            setBusy(false);
+            try { await rpc.call("display_off", null); onNote("Экран погашен."); } catch (e) { onNote(e instanceof Error ? e.message : String(e)); }
+            onClose();
           }}>
-          <Glyph name="display" size={20} /><span>Погасить экран</span>
+          <span className="mw-menu-icon"><Glyph name="display" size={18} /></span>
+          <span><strong>Погасить экран</strong><small>Сразу, Мак продолжит работать</small></span>
         </button>
-        <button type="button" className="mw-control" disabled={!power} onClick={() => setSheet("sleep")}>
-          <Glyph name="moon" size={20} /><span>Усыпить</span>
+        <button type="button" className="mw-menu-item" disabled={!power} onClick={() => setConfirm("sleep")}>
+          <span className="mw-menu-icon"><Glyph name="moon" size={18} /></span>
+          <span><strong>Усыпить…</strong><small>BB станет недоступен</small></span>
         </button>
-        <button type="button" className="mw-control mw-control-danger" disabled={!power} onClick={() => setSheet("shutdown")}>
-          <Glyph name="power" size={20} /><span>Выключить</span>
+        <button type="button" className="mw-menu-item mw-menu-danger" disabled={!power} onClick={() => setConfirm("shutdown")}>
+          <span className="mw-menu-icon"><Glyph name="power" size={18} /></span>
+          <span><strong>Выключить…</strong><small>Включить можно только кнопкой</small></span>
         </button>
+        <button type="button" className="mw-btn mw-menu-cancel" onClick={onClose}>Отмена</button>
       </div>
-      {note && <p className="mw-control-note">{note}</p>}
-      {sheet && power && (
-        <ConfirmSheet action={sheet} s={s} power={power} onClose={() => setSheet(null)}
-          onDone={(text) => { setSheet(null); show(text); }} />
-      )}
-    </section>
+    </div>
   );
 }
+
+function useNarrow(query = "(max-width: 760px)") {
+  const [narrow, setNarrow] = useState(() => typeof window !== "undefined" && window.matchMedia(query).matches);
+  useEffect(() => {
+    const mq = window.matchMedia(query);
+    const on = () => setNarrow(mq.matches);
+    on();
+    mq.addEventListener("change", on);
+    return () => mq.removeEventListener("change", on);
+  }, [query]);
+  return narrow;
+}
+
+const TABS: { value: Tab; label: string }[] = [
+  { value: "overview", label: "Обзор" },
+  { value: "system", label: "Система" },
+  { value: "power", label: "Питание" },
+  { value: "apps", label: "Приложения" },
+];
 
 // ---------- page ----------
 
 function MacWatchPage() {
   const [range, setRange] = useState<Range>(1);
-  const { status, history, error, refresh } = useMacWatch(range);
+  const { status, history, error } = useMacWatch(range);
   const now = useNow();
+  const narrow = useNarrow();
+  const [tab, setTabState] = useState<Tab>(() => (localStorage.getItem("mac-watch-tab") as Tab | null) ?? "overview");
+  const scroller = useRef<HTMLDivElement>(null);
+  const setTab = (t: Tab) => {
+    setTabState(t);
+    localStorage.setItem("mac-watch-tab", t);
+    scroller.current?.scrollTo({ top: 0 });
+  };
+  const [menu, setMenu] = useState(false);
+  const [note, setNote] = useState<{ at: number; text: string } | null>(null);
   const s = status?.snapshot ?? null;
+  const alerts = status?.alerts ?? [];
   const problem = error ?? status?.error ?? null;
 
   return (
-    <div className="mw">
+    <div className="mw" ref={scroller}>
       <div className="mw-page">
-        <Header s={s} intervalSec={status?.intervalSec ?? 15} now={now} onRefresh={refresh} />
+        <Header s={s} intervalSec={status?.intervalSec ?? 15} now={now} onPower={() => setMenu(true)} />
+        {note && now - note.at < 60_000 && <p className="mw-note" role="status">{note.text}</p>}
         {problem && <p role="alert" className="mw-error">{problem}</p>}
         {!s ? (
           <div className="mw-panel mw-skeleton" />
+        ) : narrow ? (
+          <>
+            <nav className="mw-tabs" role="tablist" aria-label="Разделы">
+              {TABS.map((t) => (
+                <button key={t.value} type="button" role="tab" aria-selected={tab === t.value} onClick={() => setTab(t.value)}>
+                  {t.label}
+                  {t.value === "overview" && alerts.length > 0 && <i className={`mw-tab-dot mw-tone-${alerts.some((a) => a.tone === "bad") ? "bad" : "warn"}`} />}
+                </button>
+              ))}
+            </nav>
+            {tab === "overview" && (
+              <>
+                <Verdict s={s} alerts={alerts} />
+                <KpiGrid s={s} go={setTab} />
+                <div className="mw-panel">
+                  <TempsSection s={s} history={history} compact />
+                  <HealthSection s={s} />
+                  <NotifySection />
+                </div>
+              </>
+            )}
+            {tab === "system" && <SystemPanel s={s} history={history} range={range} setRange={setRange} />}
+            {tab === "power" && <PowerPanel s={s} history={history} />}
+            {tab === "apps" && <AppsPanel top={s.top} />}
+          </>
         ) : (
           <>
-            <Controls s={s} />
-            <Alerts alerts={status?.alerts ?? []} />
-            {s.missing.length > 0 && <p className="mw-error">Не удалось прочитать: {s.missing.join(", ")}</p>}
+            <Verdict s={s} alerts={alerts} />
             <div className="mw-grid">
               <div className="mw-area-system"><SystemPanel s={s} history={history} range={range} setRange={setRange} /></div>
               <div className="mw-area-safety"><SafetyPanel s={s} history={history} /></div>
@@ -774,7 +946,9 @@ function MacWatchPage() {
             </div>
           </>
         )}
+        {s && s.missing.length > 0 && <p className="mw-caption">Не удалось прочитать: {s.missing.join(", ")}</p>}
       </div>
+      {menu && s && <PowerMenu s={s} onClose={() => setMenu(false)} onNote={(text) => setNote({ at: Date.now(), text })} />}
     </div>
   );
 }
