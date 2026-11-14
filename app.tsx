@@ -232,7 +232,8 @@ function LiveChart({ history, series, max, fill, format, height = 58, unit = 1 }
       if (!prev || p.at - prev.at > gap) {
         close();
         start = x(p.at);
-        line += `M${x(p.at)},${y(v)}`;
+        // The tiny step draws a dot for a lone sample (e.g. right after waking up).
+        line += `M${x(p.at)},${y(v)}h0.01`;
         area += `M${x(p.at)},${H}L${x(p.at)},${y(v)}`;
       } else {
         line += `L${x(p.at)},${y(v)}`;
