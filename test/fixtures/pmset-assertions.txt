@@ -1,0 +1,27 @@
+2026-11-14 22:12:15 +0700 
+Assertion status system-wide:
+   BackgroundTask                 0
+   ApplePushServiceTask           0
+   UserIsActive                   1
+   PreventUserIdleDisplaySleep    1
+   SoftwareUpdateTask             0
+   PreventSystemSleep             0
+   ExternalMedia                  0
+   InternalPreventDisplaySleep    1
+   PreventUserIdleSystemSleep     1
+   NetworkClientActive            0
+Listed by owning process:
+   pid 97846(Google Chrome): [0x00090b130001968c] 06:34:08 NoIdleSleepAssertion named: "WebRTC has active PeerConnections"  
+   pid 678(sharingd): [0x000966f8000196ae] 00:02:03 PreventUserIdleSystemSleep named: "Handoff"  
+   pid 345(powerd): [0x0008fca5000189db] 07:35:42 PreventUserIdleSystemSleep named: "Powerd - Prevent sleep while display is on"  
+   pid 345(powerd): [0x000964f200108a46] 00:04:27 InternalPreventDisplaySleep named: "com.apple.powermanagement.delayDisplayOff"  
+	Timeout will fire in 32 secs Action=TimeoutActionTurnOff
+   pid 404(WindowServer): [0x000964dc000993c6] 00:00:00 UserIsActive named: "com.apple.iohideventsystem.queue.tickle serviceID:100000a9a service:AppleMultitouchDevice product:Apple Internal Keyboard / Trackpad eventType:11"  
+	Timeout will fire in 599 secs Action=TimeoutActionRelease
+   pid 414(coreaudiod): [0x0009085600019113] 06:45:49 PreventUserIdleSystemSleep named: "com.apple.audio.EA2871E4-2BEE-4209-834D-40041F873183.context.preventuseridlesleep"  
+	Created for PID: 25148. 
+	Resources: audio-in audio-out BuiltInSpeakerDevice 
+   pid 25148(Vorssaint): [0x0009017a00018eef] 07:15:04 PreventUserIdleSystemSleep named: "Vorssaint: keep the Mac awake"  
+   pid 25148(Vorssaint): [0x0009017a00058ef0] 07:15:04 PreventUserIdleDisplaySleep named: "Vorssaint: keep the display on"  
+Kernel Assertions: 0x100=MAGICWAKE
+   id=570  level=255 0x100=MAGICWAKE creat=27.10.2026, 19:02  mod=14.11.2026, 15:24 description=en0 owner=IOSkywalkNetworkBSDClient

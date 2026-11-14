@@ -1,0 +1,8 @@
+  404  29.8 113104 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+30602  15.5 844944 /Applications/bb.app/Contents/Frameworks/bb Helper (Renderer).app/Contents/MacOS/bb Helper (Renderer)
+  414  11.1  45072 /usr/sbin/coreaudiod
+19412   9.8 271888 /Applications/iTerm.app/Contents/MacOS/iTerm2
+29866   9.0 119216 /Applications/bb.app/Contents/Frameworks/bb Helper.app/Contents/MacOS/bb Helper
+16235   8.5 375696 /Users/user/.local/bin/claude
+  643   8.3  15168 /System/Library/PrivateFrameworks/BiomeStreams.framework/Support/BiomeAgent
+81471   4.3  23456 /System/Library/PrivateFrameworks/CoreDuetContext.framework/Resources/ContextStoreAgent
