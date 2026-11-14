@@ -92,10 +92,14 @@
 .mw-grid {
   display: grid; gap: 18px; align-items: start;
   grid-template-columns: minmax(0, 1.12fr) minmax(0, 1fr);
-  grid-template-areas: "system safety" "system power" "apps power";
-  grid-template-rows: auto auto 1fr;
+  grid-template-areas: "system safety" "apps power";
+  align-items: stretch;
 }
 .mw-area-system { grid-area: system; min-width: 0; }
+/* Panels in one row share its height. */
+.mw-grid > div { display: flex; flex-direction: column; }
+.mw-grid > div > .mw-panel-wrap { flex: 1; }
+.mw-grid > div > .mw-panel-wrap > .mw-panel { flex: 1; }
 .mw-area-power { grid-area: power; min-width: 0; }
 .mw-area-safety { grid-area: safety; min-width: 0; }
 .mw-area-apps { grid-area: apps; min-width: 0; }
@@ -133,8 +137,8 @@
 
 /* ---------- rows ---------- */
 .mw-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 5px 0; font-size: 14px; min-width: 0; }
-.mw-row-label { color: color-mix(in srgb, var(--foreground) 82%, transparent); white-space: nowrap; }
-.mw-row-value { font-weight: 600; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mw-row-label { color: color-mix(in srgb, var(--foreground) 82%, transparent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.mw-row-value { font-weight: 600; text-align: right; white-space: nowrap; flex: none; max-width: 70%; overflow: hidden; text-overflow: ellipsis; }
 .mw-row-sub .mw-row-label { color: var(--mw-dim); }
 .mw-rows-indent { padding: 2px 0 6px 21px; }
 

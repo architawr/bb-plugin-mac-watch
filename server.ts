@@ -53,7 +53,6 @@ export const rpcContract = defineRpcContract({
     output: z.object({
       notify: z.boolean(),
       lastPush: z.custom<{ at: number; title: string; channels: string[] }>().nullable(),
-      heartbeat: z.object({ configured: z.boolean(), at: z.number().nullable(), ok: z.boolean().nullable(), error: z.string().nullable() }),
     }),
   },
   test_push: { input: z.null(), output: z.object({ channels: z.array(z.string()) }) },
@@ -85,14 +84,6 @@ export default async function plugin(bb: BbPluginApi) {
       label: "Пуш-уведомления о проблемах",
       description: "Перегрев, батарея, отключение от сети, диск, внезапная перезагрузка. Через плагин уведомлений BB.",
       default: true,
-    },
-    heartbeatUrl: {
-      type: "string",
-      label: "Адрес внешнего сторожа",
-      description: "HTTPS-адрес, на который Мак раз в минуту шлёт GET, например https://hc-ping.com/<uuid> из healthchecks.io. Если отметки прекратятся (Мак выключился, сгорел, пропала сеть), сервис сам вас предупредит. Пусто — выключено.",
-      secret: true,
-      default: "",
-      experimental_schema: z.string().trim().regex(/^$|^https:\/\/\S+$/, "Нужен адрес https://…"),
     },
   });
   let cfg = await settings.get();
@@ -185,20 +176,6 @@ export default async function plugin(bb: BbPluginApi) {
     if (restart) setTimeout(() => { restart = null; }, 24 * 3600_000).unref?.();
   }
 
-  // ---- external watchdog ----
-  let beat: { at: number | null; ok: boolean | null; error: string | null } = { at: null, ok: null, error: null };
-  async function heartbeat() {
-    const url = cfg.heartbeatUrl.trim();
-    if (!url || (beat.at && Date.now() - beat.at < 60_000)) return;
-    beat = { ...beat, at: Date.now() };
-    try {
-      const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
-      beat = { at: Date.now(), ok: res.ok, error: res.ok ? null : `HTTP ${res.status}` };
-    } catch (e) {
-      beat = { at: Date.now(), ok: false, error: e instanceof Error ? e.message : String(e) };
-    }
-  }
-
   const status = () => ({
     snapshot,
     alerts: [...(restart ? [restart] : []), ...(snapshot ? deriveAlerts(snapshot, recent.slice(0, -1)) : [])],
@@ -224,7 +201,6 @@ export default async function plugin(bb: BbPluginApi) {
         bb.realtime.publish(SAMPLE_CHANNEL, { at: next.at });
         if (Date.now() - lastPersist > PERSIST_EVERY_MS) await persist();
         await notifyAlerts(status().alerts).catch((e) => bb.log.warn(`notify failed: ${e}`));
-        void heartbeat();
         if (pending) {
           const settled = await power.settleAfterSleep(pending).catch((e: unknown) => `Не удалось вернуть запрет сна: ${e instanceof Error ? e.message : e}`);
           if (settled) {
@@ -269,7 +245,6 @@ export default async function plugin(bb: BbPluginApi) {
     safety_status: async () => ({
       notify: cfg.notify,
       lastPush,
-      heartbeat: { configured: cfg.heartbeatUrl.trim() !== "", ...beat },
     }),
     test_push: async () => ({
       channels: await push("Mac Watch: проверка", "Так будут выглядеть предупреждения о вашем Маке."),

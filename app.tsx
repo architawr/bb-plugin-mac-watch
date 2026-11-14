@@ -459,7 +459,6 @@ function PowerPanel({ s, history }: { s: Snapshot; history: History | null }) {
                 <div><strong>{e.process}{e.display && <em> · и экран</em>}</strong><span>{e.reasons.join(" · ")}</span></div>
               </div>
             ))}
-            {system.length > 0 && <div className="mw-caption mw-caption-quiet">и службы macOS: {system.map((e) => e.process).join(", ")}</div>}
           </div>
         )}
       </Sub>
@@ -476,7 +475,6 @@ function PowerPanel({ s, history }: { s: Snapshot; history: History | null }) {
         <Row label="Батарея" value={battery} tone={drain || (p?.source === "battery" && (p.percent ?? 100) <= 20) ? "warn" : undefined} />
         <Row label="Здоровье" value={p?.healthPct != null ? `${p.healthPct}%` : "—"} />
         <Row label="Циклы" value={p?.cycles ?? "—"} />
-        <div className="mw-chart-caption">Потребление, Вт</div>
         <LiveChart history={history} fill format={(v) => `${ru(v, 1)} Вт`}
           series={[{ field: "watts", color: "var(--mw-green)", name: "Ватты" }]} />
       </Sub>
@@ -510,9 +508,6 @@ function AppsPanel({ top }: { top: Snapshot["top"] }) {
             })}
           </ol>
         )}
-        <p className="mw-caption mw-caption-quiet">
-          {by === "cpu" ? "CPU в процентах одного ядра, " : ""}помощники собраны под своим приложением · раз в минуту
-        </p>
       </div>
     </Panel>
   );
@@ -523,10 +518,9 @@ function AppsPanel({ top }: { top: Snapshot["top"] }) {
 type SafetyStatus = {
   notify: boolean;
   lastPush: { at: number; title: string; channels: string[] } | null;
-  heartbeat: { configured: boolean; at: number | null; ok: boolean | null; error: string | null };
 };
 
-const PRESSURE_LABEL = ["Нормальное", "Умеренное", "Высокое", "Критическое", "Критическое"] as const;
+const PRESSURE_LABEL = ["Норма", "Умеренное", "Высокое", "Критическое", "Критическое"] as const;
 const tempTone = (v: number | null | undefined, warn: number, bad: number): Tone | undefined =>
   v == null ? undefined : v >= bad ? "bad" : v >= warn ? "warn" : undefined;
 const deg = (v: number | null | undefined) => (v == null ? "—" : ru(v, 0));
@@ -547,7 +541,6 @@ function SafetyPanel({ s, history }: { s: Snapshot; history: History | null }) {
   const p = s.power;
   const pressure = s.thermalPressure;
   const panic = s.panics?.[0];
-  const hb = safety?.heartbeat;
   const batteryOk = !bs || (bs.permanentFailure === 0 && (!bs.condition || bs.condition === "Normal") && (bs.cellSpreadMv ?? 0) < 100);
 
   return (
@@ -561,43 +554,33 @@ function SafetyPanel({ s, history }: { s: Snapshot; history: History | null }) {
           <Tile icon={<Glyph name="battery" size={15} />} label="Батарея" tone={tempTone(t?.battery ?? p?.temperatureC, 40, 50)}
             value={<>{deg(t?.battery ?? p?.temperatureC)}<small>°C</small></>} />
         </div>
-        <Row label="Тепловое давление macOS" value={pressure == null ? "—" : PRESSURE_LABEL[pressure] ?? String(pressure)}
+        <Row label="Тепловое давление" value={pressure == null ? "—" : PRESSURE_LABEL[pressure] ?? String(pressure)}
           tone={pressure == null ? undefined : pressure >= 3 ? "bad" : pressure >= 2 ? "warn" : "good"} />
-        <div className="mw-chart-caption">Процессор, °C</div>
         <LiveChart history={history} format={(v) => `${ru(v, 0)} °C`} max={110}
           series={[{ field: "soc", color: "var(--mw-orange)", name: "Процессор" }]} />
       </Sub>
 
       <Sub title="Батарея" action={<Badge tone={batteryOk ? "good" : "warn"}>{batteryOk ? "Исправна" : "Внимание"}</Badge>}>
-        <Row label="Неисправность (контроллер)" value={!bs ? "—" : bs.permanentFailure === 0 ? "Нет" : `Код ${bs.permanentFailure}`}
+        <Row label="Неисправность" value={!bs ? "—" : bs.permanentFailure === 0 ? "Нет" : `Код ${bs.permanentFailure}`}
           tone={bs && bs.permanentFailure !== 0 ? "bad" : undefined} />
-        <Row label="Состояние по macOS" value={!bs?.condition ? "—" : bs.condition === "Normal" ? "Норма" : bs.condition}
+        <Row label="Состояние" value={!bs?.condition ? "—" : bs.condition === "Normal" ? "Норма" : bs.condition}
           tone={bs?.condition && bs.condition !== "Normal" ? "warn" : undefined} />
         <Row label="Разброс ячеек" value={bs?.cellSpreadMv == null ? "—" : `${bs.cellSpreadMv} мВ`}
           tone={(bs?.cellSpreadMv ?? 0) >= 200 ? "bad" : (bs?.cellSpreadMv ?? 0) >= 100 ? "warn" : undefined} />
-        <Row label="Зарядка тормозилась от нагрева" value={bs?.thermallyLimitedSec == null ? "—" : bs.thermallyLimitedSec === 0 ? "Ни разу" : formatDuration(bs.thermallyLimitedSec)} />
-        <Row label="Максимум за всю жизнь" value={bs?.lifetimeMaxC == null ? "—" : `${bs.lifetimeMaxC} °C`} />
-        <p className="mw-caption mw-caption-quiet">Вздутие напрямую не измерить. Ранние признаки — неисправность, разброс ячеек, нагрев и рекомендация обслуживания.</p>
+        <Row label="Перегрев при зарядке" value={bs?.thermallyLimitedSec == null ? "—" : bs.thermallyLimitedSec === 0 ? "Не было" : formatDuration(bs.thermallyLimitedSec)} />
+        <Row label="Пик температуры" value={bs?.lifetimeMaxC == null ? "—" : `${bs.lifetimeMaxC} °C`} />
       </Sub>
 
       <Sub title="Система">
         <Row label="SSD (SMART)" value={!s.disk?.smart ? "—" : s.disk.smart === "Verified" ? "В порядке" : s.disk.smart}
           tone={s.disk?.smart && s.disk.smart !== "Verified" ? "bad" : undefined} />
-        <Row label="Kernel panic за 7 дней" value={panic ? `${s.panics.length}, последний ${dayTime(panic)}` : "Не было"}
+        <Row label="Kernel panic, 7 дней" value={panic ? `${s.panics.length}, последний ${dayTime(panic)}` : "Не было"}
           tone={panic ? "warn" : undefined} />
       </Sub>
 
-      <Sub title="Если что-то случится">
+      <Sub title="Уведомления">
         <Row label={<span className="mw-inline"><Glyph name="bell" size={14} />Пуш на телефон</span>}
           value={!safety ? "—" : safety.notify ? "Включены" : "Выключены"} tone={safety?.notify ? "good" : "warn"} />
-        {safety?.lastPush && <Row sub label="Последний" value={`${safety.lastPush.title.replace(/^[^\p{L}\d]+/u, "")} · ${clock(safety.lastPush.at)}`} />}
-        <Row label={<span className="mw-inline"><Glyph name="pulse" size={14} />Внешний сторож</span>}
-          value={!hb ? "—" : !hb.configured ? "Не настроен" : hb.ok ? `Отметка ${clock(hb.at)}` : hb.at ? "Ошибка отметки" : "Ждёт отметки"}
-          tone={!hb ? undefined : !hb.configured ? "warn" : hb.ok === false ? "bad" : "good"} />
-        {hb && !hb.configured && (
-          <p className="mw-caption">Если Мак выключится, сгорит или потеряет сеть, плагин об этом не скажет — он умрёт вместе с Маком. Предупредить может только внешний сервис: создайте проверку в healthchecks.io с периодом 1–2 мин и вставьте её адрес в Settings → Mac Watch.</p>
-        )}
-        {hb?.error && <p className="mw-caption mw-text-bad">{hb.error}</p>}
         <div className="mw-inline-actions">
           <button type="button" className="mw-btn mw-btn-small" disabled={testing === "…"}
             onClick={async () => {
@@ -782,16 +765,13 @@ function MacWatchPage() {
           <>
             <Controls s={s} />
             <Alerts alerts={status?.alerts ?? []} />
+            {s.missing.length > 0 && <p className="mw-error">Не удалось прочитать: {s.missing.join(", ")}</p>}
             <div className="mw-grid">
               <div className="mw-area-system"><SystemPanel s={s} history={history} range={range} setRange={setRange} /></div>
               <div className="mw-area-safety"><SafetyPanel s={s} history={history} /></div>
               <div className="mw-area-power"><PowerPanel s={s} history={history} /></div>
               <div className="mw-area-apps"><AppsPanel top={s.top} /></div>
             </div>
-            <footer className="mw-footer">
-              {s.host.model} · замер каждые {status?.intervalSec ?? 15} с, пока работает BB · история 24 ч хранится локально
-              {s.missing.length > 0 && <> · не прочитано: {s.missing.join(", ")}</>}
-            </footer>
           </>
         )}
       </div>

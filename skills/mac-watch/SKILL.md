@@ -35,9 +35,8 @@ Notes for answering:
 - Alerts are pushed to the user's phone through the push-notifications plugin
   after they hold for two samples, then at most every 30 min (bad) or 3 h (warn).
   An unexpected reboot shows up as alert `restart` for 24 h.
-- If the Mac dies, the plugin dies with it. Only the optional external watchdog
-  (setting `heartbeatUrl`, e.g. healthchecks.io, pinged every minute) can tell
-  the user then.
+- If the Mac dies or loses power and network, the plugin dies with it and cannot
+  report it; the page then simply stops updating.
 
 ## Power actions
 
