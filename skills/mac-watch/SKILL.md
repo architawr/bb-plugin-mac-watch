@@ -27,6 +27,22 @@ Notes for answering:
   hold idle-sleep or display-sleep assertions; the plugin does not depend on any
   particular keep-awake app.
 - CPU of processes is percent of one core; helpers are grouped under their app.
-- The plugin cannot put the Mac to sleep yet; do not claim it can.
+
+## Power actions
+
+Run these only when the user explicitly asks; sleep and shutdown cut the Mac off
+from BB, and this thread with it.
+
+- `bb mac-watch display-off` — turn the display off. Any touch wakes it again.
+- `bb mac-watch sleep --yes [--wake 1|4|8]` — sleep now. Nobody can wake it remotely,
+  only a timer (`--wake`, needs the sudo rule), the lid or a key. If sleep was
+  disabled system-wide, the plugin clears it for the nap and sets it back after a
+  full wake (not a maintenance DarkWake) while some app still keeps the Mac awake.
+- `bb mac-watch shutdown --yes` — power off; only the power button turns it back on.
+  There is no restart on purpose: with FileVault on, the Mac stops at the unlock
+  screen and BB would not come back.
+
+Root commands go through `sudo -n` and need the NOPASSWD rule from
+`sudoers/install.sh` in the plugin folder, which the user runs once on the Mac.
 
 The full dashboard is the **Mac Watch** page in the BB sidebar.

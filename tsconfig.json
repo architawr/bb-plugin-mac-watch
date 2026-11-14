@@ -13,13 +13,15 @@
       "node"
     ],
     "noEmit": true,
-    "skipLibCheck": false
+    "skipLibCheck": false,
+    "allowImportingTsExtensions": true
   },
   "include": [
     "server.ts",
     "app.tsx",
     "core.ts",
     "collector.ts",
-    "icons.ts"
+    "icons.ts",
+    "power.ts"
   ]
 }

@@ -17,6 +17,8 @@ bb plugin install "$PWD" --yes   # или bb plugin reload mac-watch
 - `core.ts`: чистые парсеры, предупреждения, вердикт «уснёт ли Мак», форматирование.
 - `collector.ts`: запускает утилиты macOS и собирает `Snapshot`.
 - `icons.ts`: иконки приложений из `.app` через `sips`, с кэшем.
+- `power.ts`: погасить экран, сон (с таймером пробуждения) и выключение. Флаг `disablesleep` возвращается после настоящего пробуждения.
+- `sudoers/install.sh`: правило NOPASSWD только для `pmset disablesleep 0|1`, `pmset relative wake 3600|14400|28800` и `shutdown -h now`. Пользователь запускает его сам: `sh sudoers/install.sh`.
 - `server.ts`: фоновый опрос каждые 15 с, история за 24 ч, RPC и CLI.
 - `app.tsx` и `style.css`: страница.
 

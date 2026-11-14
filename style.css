@@ -234,6 +234,61 @@ img.mw-app-icon { object-fit: contain; }
 }
 @keyframes mw-shimmer { 0% { background-position: -400px 0; } 100% { background-position: 400px 0; } }
 
+
+/* ---------- power controls ---------- */
+.mw-controls { display: flex; flex-direction: column; gap: 8px; }
+.mw-control-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.mw-control {
+  --tone: var(--foreground);
+  display: flex; align-items: center; justify-content: center; gap: 9px; min-height: 48px; padding: 10px 12px;
+  border-radius: 13px; border: 1px solid var(--mw-edge); background: var(--mw-panel); cursor: pointer;
+  font-size: 14px; font-weight: 600; color: var(--tone); transition: background .15s, transform .1s;
+}
+.mw-control:hover { background: var(--mw-tile); }
+.mw-control:active { transform: scale(.98); }
+.mw-control:disabled { opacity: .5; cursor: default; }
+.mw-control .mw-glyph { color: color-mix(in srgb, var(--tone) 75%, var(--mw-dim)); }
+.mw-control-danger { --tone: var(--mw-bad); }
+.mw-control-note { font-size: 12.5px; color: var(--mw-dim); padding: 0 4px; }
+
+.mw-btn {
+  min-height: 42px; padding: 0 18px; border-radius: 11px; border: 1px solid var(--mw-edge); cursor: pointer;
+  background: var(--mw-tile); font-size: 14.5px; font-weight: 600;
+}
+.mw-btn:disabled { opacity: .45; cursor: default; }
+.mw-btn-primary { background: var(--mw-blue); border-color: transparent; color: #fff !important; }
+.mw-btn-danger { background: var(--mw-bad); border-color: transparent; color: #fff !important; }
+
+.mw-sheet-backdrop {
+  position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; padding: 16px;
+  background: color-mix(in srgb, #000 45%, transparent); backdrop-filter: blur(3px);
+  animation: mw-fade .15s ease-out;
+}
+.mw-sheet {
+  width: min(440px, 100%); max-height: calc(100% - 24px); overflow-y: auto;
+  background: var(--background); border: 1px solid var(--mw-edge); border-radius: 18px; padding: 20px;
+  display: flex; flex-direction: column; gap: 12px; box-shadow: 0 20px 60px color-mix(in srgb, #000 40%, transparent);
+  animation: mw-rise .2s cubic-bezier(.2, .8, .2, 1);
+}
+.mw-sheet h2 { font-size: 18px; font-weight: 680; margin: 0; }
+.mw-sheet p { font-size: 14px; line-height: 1.45; color: color-mix(in srgb, var(--foreground) 85%, transparent); margin: 0; }
+.mw-sheet .mw-segmented { align-self: flex-start; }
+.mw-sheet-icon {
+  --tone: var(--mw-blue);
+  width: 44px; height: 44px; border-radius: 13px; display: grid; place-items: center;
+  color: var(--tone); background: color-mix(in srgb, var(--tone) 14%, transparent);
+}
+.mw-sheet-note { font-size: 12.5px !important; color: var(--mw-dim) !important; }
+.mw-sheet-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 4px; }
+.mw-setup { padding: 12px; border-radius: 12px; background: color-mix(in srgb, var(--mw-warn) 10%, var(--mw-tile)); display: flex; flex-direction: column; gap: 10px; }
+.mw-setup p { font-size: 12.5px !important; }
+.mw-setup strong { color: var(--mw-warn); }
+.mw-setup code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+.mw-code { display: flex; align-items: center; gap: 8px; padding: 8px 8px 8px 10px; border-radius: 9px; background: var(--background); border: 1px solid var(--mw-edge); }
+.mw-code code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; }
+@keyframes mw-fade { from { opacity: 0; } }
+@keyframes mw-rise { from { opacity: 0; transform: translateY(12px) scale(.98); } }
+
 /* ---------- responsive ---------- */
 @media (max-width: 880px) {
   /* On a phone the first question is "is it awake and powered", then load, then apps. */
@@ -244,9 +299,15 @@ img.mw-app-icon { object-fit: contain; }
   .mw-panel { padding: 2px 14px; border-radius: 15px; }
   .mw-header p { font-size: 12px; }
   .mw-header-icon { display: none; }
+  .mw-control-row { gap: 8px; }
+  .mw-control { flex-direction: column; gap: 5px; min-height: 64px; font-size: 12.5px; padding: 8px 6px; }
+  .mw-sheet-backdrop { align-items: flex-end; padding: 0; }
+  .mw-sheet { width: 100%; border-radius: 20px 20px 0 0; padding: 20px 18px calc(20px + env(safe-area-inset-bottom)); }
+  .mw-sheet-actions .mw-btn { flex: 1; }
   .mw-header { gap: 10px; }
   .mw-header .mw-badge { padding: 0 9px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .mw *, .mw *::before { animation: none !important; transition: none !important; }
 }
+.mw-sheet-icon.mw-tone-bad { --tone: var(--mw-bad); }

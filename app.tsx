@@ -114,6 +114,9 @@ const glyphs = {
   terminal: <><rect x="3" y="4" width="18" height="16" rx="3" /><path d="m7 9 3 3-3 3M12 15h5" /></>,
   arrowDown: <path d="M12 5v14M6 13l6 6 6-6" />,
   arrowUp: <path d="M12 19V5M6 11l6-6 6 6" />,
+  display: <><rect x="3" y="4" width="18" height="12" rx="2" /><path d="M8 20h8M12 16v4" /><path d="M14.5 8.2A3 3 0 1 1 10.8 12" /></>,
+  power: <><path d="M12 3v8" /><path d="M6.4 6.6a8 8 0 1 0 11.2 0" /></>,
+  copy: <><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" /></>,
 } satisfies Record<string, ReactNode>;
 type GlyphName = keyof typeof glyphs;
 
@@ -510,6 +513,151 @@ function AppsPanel({ top }: { top: Snapshot["top"] }) {
   );
 }
 
+// ---------- power controls ----------
+
+type PowerStatus = {
+  privileges: { toggleSleep: boolean; wake: boolean; shutdown: boolean };
+  pending: { at: number; restoreSleepDisabled: boolean; wakeHours: number | null } | null;
+  note: { at: number; text: string } | null;
+  installCommand: string;
+};
+type Action = "sleep" | "shutdown";
+const WAKE_OPTIONS = [
+  { value: 0, label: "Без таймера" },
+  { value: 1, label: "1 ч" },
+  { value: 4, label: "4 ч" },
+  { value: 8, label: "8 ч" },
+] as const;
+
+function usePower() {
+  const rpc = useRpc<typeof rpcContract>();
+  const [power, setPower] = useState<PowerStatus | null>(null);
+  const read = useCallback(() => { rpc.call("power_status", null).then(setPower, () => undefined); }, [rpc]);
+  useEffect(read, [read]);
+  useEffect(() => {
+    const timer = setInterval(read, 30_000);
+    return () => clearInterval(timer);
+  }, [read]);
+  return { rpc, power, read };
+}
+
+function SetupHint({ command, need }: { command: string; need: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="mw-setup">
+      <p><strong>{need}</strong> Один раз выполните в Терминале на Маке или по SSH. Скрипт спросит пароль администратора и разрешит без пароля только эти команды: <code>pmset disablesleep</code>, <code>pmset relative wake</code> и <code>shutdown -h now</code>.</p>
+      <div className="mw-code">
+        <code>{command}</code>
+        <button type="button" className="mw-icon-button" aria-label="Скопировать команду"
+          onClick={() => { void navigator.clipboard?.writeText(command).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); }); }}>
+          <Glyph name={copied ? "check" : "copy"} size={14} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ConfirmSheet({ action, s, power, onClose, onDone }: {
+  action: Action; s: Snapshot; power: PowerStatus; onClose: () => void; onDone: (text: string) => void;
+}) {
+  const rpc = useRpc<typeof rpcContract>();
+  const [wake, setWake] = useState<0 | 1 | 4 | 8>(0);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const p = power.privileges;
+  const sleepBlocked = action === "sleep" && !!s.sleep?.sleepDisabled && !p.toggleSleep;
+  const wakeBlocked = action === "sleep" && wake !== 0 && !p.wake;
+  const shutdownBlocked = action === "shutdown" && !p.shutdown;
+  const blocked = sleepBlocked || wakeBlocked || shutdownBlocked;
+
+  const go = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      if (action === "sleep") {
+        await rpc.call("sleep", { wakeHours: wake === 0 ? null : wake });
+        onDone(wake ? `Мак засыпает и проснётся через ${wake} ч.` : "Мак засыпает. Разбудить его можно только на месте.");
+      } else {
+        await rpc.call("shutdown", { confirm: "shutdown" });
+        onDone("Мак выключается. Включить его можно кнопкой питания.");
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div className="mw-sheet-backdrop" onClick={onClose}>
+      <div className="mw-sheet" role="dialog" aria-modal="true" aria-labelledby="mw-sheet-title" onClick={(e) => e.stopPropagation()}>
+        <div className={`mw-sheet-icon ${action === "shutdown" ? "mw-tone-bad" : ""}`}><Glyph name={action === "sleep" ? "moon" : "power"} size={22} /></div>
+        <h2 id="mw-sheet-title">{action === "sleep" ? "Усыпить Мак?" : "Выключить Мак?"}</h2>
+        {action === "sleep" ? (
+          <>
+            <p>BB станет недоступен. Удалённо Мак не разбудить: только открыть крышку, нажать клавишу или поставить таймер.</p>
+            <Segmented label="Проснуться через" value={wake} onChange={setWake} options={[...WAKE_OPTIONS]} />
+            {s.sleep?.sleepDisabled && p.toggleSleep && (
+              <p className="mw-sheet-note">Сейчас сон запрещён системно. На время сна плагин снимет запрет, а после настоящего пробуждения вернёт его, если приложение всё ещё держит Мак бодрым.</p>
+            )}
+          </>
+        ) : (
+          <p>Мак выключится полностью. Включить его можно только кнопкой питания на самом Маке. Несохранённые данные в открытых приложениях пропадут.</p>
+        )}
+        {sleepBlocked && <SetupHint command={power.installCommand} need="Сон сейчас запрещён системно, а снять запрет без пароля нельзя." />}
+        {wakeBlocked && <SetupHint command={power.installCommand} need="Для таймера пробуждения нужно правило sudo." />}
+        {shutdownBlocked && <SetupHint command={power.installCommand} need="Для выключения нужно правило sudo." />}
+        {error && <p role="alert" className="mw-error">{error}</p>}
+        <div className="mw-sheet-actions">
+          <button type="button" className="mw-btn" onClick={onClose}>Отмена</button>
+          <button type="button" className={`mw-btn ${action === "shutdown" ? "mw-btn-danger" : "mw-btn-primary"}`} disabled={busy || blocked} onClick={go}>
+            {busy ? "Отправляю…" : action === "sleep" ? "Усыпить" : "Выключить"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Controls({ s }: { s: Snapshot }) {
+  const { rpc, power, read } = usePower();
+  const [sheet, setSheet] = useState<Action | null>(null);
+  const [flash, setFlash] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const show = (text: string) => { setFlash(text); read(); };
+  const note = flash ?? (power?.note && Date.now() - power.note.at < 6 * 3600_000 ? `${power.note.text} · ${clock(power.note.at)}` : null);
+  return (
+    <section className="mw-controls" aria-label="Управление Маком">
+      <div className="mw-control-row">
+        <button type="button" className="mw-control" disabled={busy}
+          onClick={async () => {
+            setBusy(true);
+            try { await rpc.call("display_off", null); show("Экран погашен."); } catch (e) { show(e instanceof Error ? e.message : String(e)); }
+            setBusy(false);
+          }}>
+          <Glyph name="display" size={20} /><span>Погасить экран</span>
+        </button>
+        <button type="button" className="mw-control" disabled={!power} onClick={() => setSheet("sleep")}>
+          <Glyph name="moon" size={20} /><span>Усыпить</span>
+        </button>
+        <button type="button" className="mw-control mw-control-danger" disabled={!power} onClick={() => setSheet("shutdown")}>
+          <Glyph name="power" size={20} /><span>Выключить</span>
+        </button>
+      </div>
+      {note && <p className="mw-control-note">{note}</p>}
+      {sheet && power && (
+        <ConfirmSheet action={sheet} s={s} power={power} onClose={() => setSheet(null)}
+          onDone={(text) => { setSheet(null); show(text); }} />
+      )}
+    </section>
+  );
+}
+
 // ---------- page ----------
 
 function MacWatchPage() {
@@ -528,6 +676,7 @@ function MacWatchPage() {
           <div className="mw-panel mw-skeleton" />
         ) : (
           <>
+            <Controls s={s} />
             <Alerts alerts={status?.alerts ?? []} />
             <div className="mw-grid">
               <div className="mw-area-system"><SystemPanel s={s} history={history} range={range} setRange={setRange} /></div>

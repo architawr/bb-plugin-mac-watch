@@ -468,3 +468,20 @@ export function downsample(points: HistoryPoint[], from: number, bucketMs: numbe
       watts: avg(list, "watts"),
     }));
 }
+
+// ---------- sleep log ----------
+
+/**
+ * The kind of the last wake after `after` in `pmset -g log` output. A DarkWake
+ * is macOS doing maintenance with the lid closed; only a full Wake means
+ * someone (or a scheduled timer) brought the Mac back.
+ */
+export function lastWakeKind(log: string, after: number): "full" | "dark" | null {
+  let kind: "full" | "dark" | null = null;
+  const re = /^(\d{4}-\d\d-\d\d) (\d\d:\d\d:\d\d) ([+-]\d\d)(\d\d) (Wake|DarkWake)\s/gm;
+  for (let m = re.exec(log); m; m = re.exec(log)) {
+    const at = Date.parse(`${m[1]}T${m[2]}${m[3]}:${m[4]}`);
+    if (at > after) kind = m[5] === "Wake" ? "full" : "dark";
+  }
+  return kind;
+}
