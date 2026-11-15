@@ -34,5 +34,9 @@
     "typecheck": "tsc --noEmit",
     "build": "bb plugin build"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/architawr/bb-plugin-mac-watch.git"
+  }
 }

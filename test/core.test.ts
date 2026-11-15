@@ -2,9 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
-  awakeVerdict, deriveAlerts, downsample, groupProcs, parseAssertions, parseBattery, parseClamshell,
-  parseDefaultInterface, parseKernTime, parseNetstat, parsePmsetSettings, parsePs, parseSwap, parseTherm,
-  parseVmStat, signed64, type Snapshot,
+  awakeVerdict, deriveAlerts, downsample, groupProcs, inQuietHours, parseAssertions, parseBattery, parseClamshell,
+  parseDefaultInterface, parseKernTime, parseNetstat, parsePmsetSettings, parsePs, parseQuietHours, parseSwap,
+  parseTherm, parseVmStat, signed64, type Snapshot,
 } from "../core.ts";
 
 const fixture = (name: string) => readFileSync(new URL(`./fixtures/${name}`, import.meta.url), "utf8");
@@ -127,9 +127,9 @@ test("alerts: AC drain needs several samples in a row", () => {
   assert.equal(deriveAlerts(drain, [drain, drain])[0]?.id, "ac-drain");
 });
 
-test("alerts: the Mac will fall asleep", () => {
+test("alerts: being free to sleep is not an alert", () => {
   const s: Snapshot = { ...base, sleep: { ...base.sleep!, sleepDisabled: false, lidClosed: false, idleSleepPrevented: false, idleSleepMinutes: 10 } };
-  assert.equal(deriveAlerts(s, [])[0]?.id, "idle");
+  assert.deepEqual(deriveAlerts(s, []), []);
   assert.equal(awakeVerdict(s.sleep).tone, "bad");
 });
 
@@ -138,4 +138,24 @@ test("downsample keeps gaps", () => {
   const out = downsample([p(0, 10), p(10, 20), p(1000, 40)], 0, 100);
   assert.equal(out.length, 2);
   assert.equal(out[0]!.cpu, 15);
+});
+
+test("quiet hours: a wrapped window covers midnight, off and garbage mean none", () => {
+  assert.deepEqual(parseQuietHours("23:00-09:00"), { from: 1380, to: 540 });
+  assert.deepEqual(parseQuietHours(" 1:5 - 6:30 "), { from: 65, to: 390 });
+  assert.equal(parseQuietHours("off"), null);
+  assert.equal(parseQuietHours(""), null);
+  assert.equal(parseQuietHours("25:00-09:00"), null);
+  assert.equal(parseQuietHours("12:00-12:00"), null);
+  const at = (hours: number, minutes = 0) => new Date(2026, 10, 15, hours, minutes);
+  const night = parseQuietHours("23:00-09:00")!;
+  assert.equal(inQuietHours(at(23, 30), night), true);
+  assert.equal(inQuietHours(at(0), night), true);
+  assert.equal(inQuietHours(at(8, 59), night), true);
+  assert.equal(inQuietHours(at(9), night), false);
+  assert.equal(inQuietHours(at(22, 59), night), false);
+  assert.equal(inQuietHours(at(12), null), false);
+  const day = parseQuietHours("09:00-18:00")!;
+  assert.equal(inQuietHours(at(12), day), true);
+  assert.equal(inQuietHours(at(3), day), false);
 });

@@ -79,7 +79,13 @@ export type Snapshot = {
   missing: string[];
 };
 
-export type Alert = { id: string; tone: Exclude<Tone, "good">; title: string; detail: string };
+/**
+ * When an alert may reach the phone: `always` at any hour, `day` only outside
+ * the quiet hours (a problem that can wait until the morning).
+ */
+export type AlertPush = "always" | "day";
+
+export type Alert = { id: string; tone: Exclude<Tone, "good">; title: string; detail: string; push: AlertPush };
 
 export type BatterySafety = {
   /** Non-zero means the battery's own controller reported a permanent failure. */
@@ -330,12 +336,13 @@ const GB = 1024 ** 3;
 export function deriveAlerts(s: Snapshot, recent: Snapshot[]): Alert[] {
   const alerts: Alert[] = [];
   const p = s.power;
-  if (p?.source === "battery") {
-    const low = p.percent !== null && p.percent <= 20;
+  // Running on battery is normal; only a nearly empty one is news.
+  if (p?.source === "battery" && p.percent !== null && p.percent <= 20) {
     alerts.push({
       id: "on-battery",
-      tone: low ? "bad" : "warn",
-      title: low ? `Батарея садится: ${p.percent}%` : "Мак работает от батареи",
+      tone: "bad",
+      push: "always",
+      title: `Батарея садится: ${p.percent}%`,
       detail: p.minutesToEmpty ? `Хватит примерно на ${formatMinutes(p.minutesToEmpty)}.` : "Проверьте, подключена ли зарядка.",
     });
   }
@@ -347,6 +354,7 @@ export function deriveAlerts(s: Snapshot, recent: Snapshot[]): Alert[] {
     alerts.push({
       id: "ac-drain",
       tone: "warn",
+      push: "day",
       title: "Зарядка не успевает",
       detail: `Мак берёт из батареи ${Math.abs(p.batteryWatts ?? 0).toFixed(1)} Вт, хотя подключён к сети${p.adapterWatts ? ` (${p.adapterWatts} Вт)` : ""}. Нужен адаптер мощнее.`,
     });
@@ -355,86 +363,146 @@ export function deriveAlerts(s: Snapshot, recent: Snapshot[]): Alert[] {
     alerts.push({
       id: "memory",
       tone: s.memory.pressure === "critical" ? "bad" : "warn",
+      push: "day",
       title: s.memory.pressure === "critical" ? "Памяти критически не хватает" : "Память под нагрузкой",
       detail: "macOS активно сжимает память и пишет в своп. Закройте тяжёлые приложения.",
     });
   }
   if (s.disk && (s.disk.free < 10 * GB || s.disk.free / s.disk.total < 0.05)) {
-    alerts.push({ id: "disk", tone: "bad", title: "Диск почти заполнен", detail: `Свободно ${formatBytes(s.disk.free)}.` });
-  } else if (s.disk && s.disk.free < 25 * GB) {
-    alerts.push({ id: "disk", tone: "warn", title: "Мало места на диске", detail: `Свободно ${formatBytes(s.disk.free)}.` });
-  }
-  const busy = [...recent, s].slice(-8);
-  if (busy.length >= 8 && busy.every((x) => (x.cpu.usage ?? 0) >= 90)) {
-    alerts.push({ id: "cpu", tone: "warn", title: "Процессор загружен на 90%+", detail: "Уже несколько минут подряд." });
+    alerts.push({ id: "disk", tone: "bad", push: "day", title: "Диск почти заполнен", detail: `Свободно ${formatBytes(s.disk.free)}.` });
   }
   if (s.thermal?.throttled) {
-    alerts.push({ id: "thermal", tone: "warn", title: "Мак перегревается", detail: "macOS снижает частоту процессора." });
+    alerts.push({ id: "thermal", tone: "warn", push: "day", title: "Мак перегревается", detail: "macOS снижает частоту процессора." });
   }
   if (p?.temperatureC != null && p.temperatureC >= 45 && p.temperatureC < 50) {
-    alerts.push({ id: "battery-temp", tone: "warn", title: `Батарея нагрета до ${p.temperatureC}°`, detail: "Выше 45° она изнашивается быстрее." });
-  }
-  const sl = s.sleep;
-  if (sl && sl.lidClosed && !sl.sleepDisabled) {
-    alerts.push({
-      id: "lid",
-      tone: "warn",
-      title: "Крышка закрыта, сон не запрещён",
-      detail: "Мак держится на внешнем мониторе или запрете приложения. Без них он уснёт.",
-    });
-  } else if (sl && !sl.idleSleepPrevented && !sl.sleepDisabled && (sl.idleSleepMinutes ?? 0) > 0) {
-    alerts.push({
-      id: "idle",
-      tone: "warn",
-      title: "Мак может уснуть",
-      detail: `Никто не держит его бодрым: уснёт после ${sl.idleSleepMinutes} мин бездействия.`,
-    });
+    alerts.push({ id: "battery-temp", tone: "warn", push: "day", title: `Батарея нагрета до ${p.temperatureC}°`, detail: "Выше 45° она изнашивается быстрее." });
   }
   const t = s.temps;
   const hot = [...recent, s].slice(-4);
   if (t?.soc != null && t.soc >= 100) {
-    alerts.push({ id: "soc-hot", tone: "bad", title: `Процессор раскалён: ${Math.round(t.soc)} °C`, detail: "Это выше нормы даже под нагрузкой. Проверьте, чем занят Мак, и не лежит ли он на мягком." });
+    alerts.push({ id: "soc-hot", tone: "bad", push: "always", title: `Процессор раскалён: ${Math.round(t.soc)} °C`, detail: "Это выше нормы даже под нагрузкой. Проверьте, чем занят Мак, и не лежит ли он на мягком." });
   } else if (hot.length >= 4 && hot.every((x) => (x.temps?.soc ?? 0) >= 90)) {
-    alerts.push({ id: "soc-hot", tone: "warn", title: `Процессор долго горячий: ${Math.round(t!.soc!)} °C`, detail: "Больше минуты выше 90 °C." });
+    alerts.push({ id: "soc-hot", tone: "warn", push: "day", title: `Процессор долго горячий: ${Math.round(t!.soc!)} °C`, detail: "Больше минуты выше 90 °C." });
   }
   if ((s.thermalPressure ?? 0) >= 2) {
     alerts.push({
       id: "thermal-pressure",
       tone: (s.thermalPressure ?? 0) >= 3 ? "bad" : "warn",
+      push: (s.thermalPressure ?? 0) >= 3 ? "always" : "day",
       title: (s.thermalPressure ?? 0) >= 3 ? "Критический перегрев" : "Мак перегревается",
       detail: "macOS сама сбрасывает частоты, чтобы остыть.",
     });
   }
   const bs = s.batterySafety;
   if (bs && bs.permanentFailure !== 0) {
-    alerts.push({ id: "battery-failure", tone: "bad", title: "Контроллер батареи сообщил о неисправности", detail: "Отключите Мак от сети и отнесите в сервис: это признак опасной батареи." });
-  }
-  if (bs?.condition && bs.condition !== "Normal") {
-    alerts.push({ id: "battery-condition", tone: "warn", title: `Батарея: ${bs.condition}`, detail: "macOS рекомендует обслуживание батареи." });
-  }
-  if (bs?.cellSpreadMv != null && bs.cellSpreadMv >= 100) {
-    alerts.push({
-      id: "battery-cells",
-      tone: bs.cellSpreadMv >= 200 ? "bad" : "warn",
-      title: `Разбаланс ячеек батареи: ${bs.cellSpreadMv} мВ`,
-      detail: "У здоровой батареи ячейки отличаются на единицы милливольт. Большой разброс — ранний признак деградации.",
-    });
-  }
-  const prevLimit = recent.at(-1)?.batterySafety?.thermallyLimitedSec;
-  if (bs?.thermallyLimitedSec != null && prevLimit != null && bs.thermallyLimitedSec > prevLimit) {
-    alerts.push({ id: "charge-hot", tone: "warn", title: "Зарядка ограничена из-за нагрева", detail: "Батарея слишком тёплая, macOS притормаживает зарядку." });
+    alerts.push({ id: "battery-failure", tone: "bad", push: "always", title: "Контроллер батареи сообщил о неисправности", detail: "Отключите Мак от сети и отнесите в сервис: это признак опасной батареи." });
   }
   if (p?.temperatureC != null && p.temperatureC >= 50) {
-    alerts.push({ id: "battery-temp", tone: "bad", title: `Батарея горячая: ${p.temperatureC} °C`, detail: "Отключите зарядку. Выше 50 °C батарея рискует вздуться." });
+    alerts.push({ id: "battery-temp", tone: "bad", push: "always", title: `Батарея горячая: ${p.temperatureC} °C`, detail: "Отключите зарядку. Выше 50 °C батарея рискует вздуться." });
   }
   if (s.disk?.smart && s.disk.smart !== "Verified") {
-    alerts.push({ id: "smart", tone: "bad", title: `Диск: SMART ${s.disk.smart}`, detail: "Накопитель сообщает о проблеме. Сделайте резервную копию." });
+    alerts.push({ id: "smart", tone: "bad", push: "always", title: `Диск: SMART ${s.disk.smart}`, detail: "Накопитель сообщает о проблеме. Сделайте резервную копию." });
   }
   const panic = s.panics?.[0];
   if (panic && s.at - panic < 24 * 3600_000) {
-    alerts.push({ id: "panic", tone: "warn", title: "Мак падал с kernel panic", detail: `Последний раз ${new Date(panic).toLocaleString("ru-RU")}. После паники Мак перезагружается сам.` });
+    // Already happened: it can wait for the morning.
+    alerts.push({ id: "panic", tone: "warn", push: "day", title: "Мак падал с kernel panic", detail: `Последний раз ${new Date(panic).toLocaleString("ru-RU")}. После паники Мак перезагружается сам.` });
   }
   return alerts;
+}
+
+// ---------- quiet hours ----------
+
+/** `"23:00-09:00"` → minutes of the day; `off`, empty or garbage → null (no quiet hours). */
+export function parseQuietHours(text: string | undefined): { from: number; to: number } | null {
+  const match = /^\s*(\d{1,2}):(\d{1,2})\s*[-–]\s*(\d{1,2}):(\d{1,2})\s*$/.exec(text ?? "");
+  if (!match) return null;
+  const minutes = (h: string, m: string) => (Number(h) < 24 && Number(m) < 60 ? Number(h) * 60 + Number(m) : null);
+  const from = minutes(match[1]!, match[2]!);
+  const to = minutes(match[3]!, match[4]!);
+  if (from === null || to === null || from === to) return null;
+  return { from, to };
+}
+
+/** Local time inside the window; `23:00-09:00` wraps over midnight. */
+export function inQuietHours(date: Date, quiet: { from: number; to: number } | null): boolean {
+  if (!quiet) return false;
+  const now = date.getHours() * 60 + date.getMinutes();
+  return quiet.from < quiet.to ? now >= quiet.from && now < quiet.to : now >= quiet.from || now < quiet.to;
+}
+
+// ---------- notifications ----------
+
+/** Everything the notification policy remembers between ticks and plugin restarts. */
+export type NotifyState = {
+  /** How many samples in a row each alert has held. */
+  streak: Map<string, number>;
+  /** The alert as it looked on the last tick, for the all-clear text. */
+  seen: Map<string, Alert>;
+  /** Last time each alert actually went to the phone; persisted, so a reload does not repeat it. */
+  notified: Record<string, number>;
+  /** Alerts reported in their current episode: only those get an all-clear. */
+  sent: Set<string>;
+  /** Last time anything at all went out. */
+  lastSentAt: number;
+};
+
+export type NotifyOptions = {
+  now: number;
+  /** Inside the quiet hours only "always" alerts go out. */
+  quiet: boolean;
+  enabled: boolean;
+  cooldown: Record<"always" | "day", number>;
+  /** At most one notification per this gap, however many alerts are due. */
+  gap: number;
+};
+
+export type Notification = { id: string; title: string; body: string };
+
+/**
+ * What to send right now. An alert must hold for two samples, `day` alerts wait
+ * out the quiet hours, and a burst of several alerts yields one notification per
+ * `gap`. Mutates `state`.
+ */
+export function planNotifications(alerts: Alert[], state: NotifyState, opts: NotifyOptions): Notification[] {
+  const out: Notification[] = [];
+  const live = new Set(alerts.map((a) => a.id));
+  const due: Alert[] = [];
+  for (const a of alerts) {
+    const n = (state.streak.get(a.id) ?? 0) + 1;
+    state.streak.set(a.id, n);
+    if (n >= 2) due.push(a);
+  }
+  // The most serious first: whatever does not fit in the gap waits for a later tick.
+  const rank = { always: 0, day: 1 } as const;
+  due.sort((a, b) => rank[a.push] - rank[b.push]);
+
+  for (const a of due) {
+    if (!opts.enabled) continue;
+    if (opts.quiet && a.push === "day") continue;
+    // Never notified before: no cooldown to wait out.
+    if (opts.now - (state.notified[a.id] ?? -Infinity) < opts.cooldown[a.push]) continue;
+    if (opts.now - state.lastSentAt < opts.gap) continue;
+    state.notified[a.id] = opts.now;
+    state.lastSentAt = opts.now;
+    state.sent.add(a.id);
+    out.push({ id: a.id, title: `${a.push === "always" ? "🔴" : "🟠"} ${a.title}`, body: a.detail });
+  }
+
+  for (const [id] of state.streak) {
+    if (live.has(id)) continue;
+    state.streak.delete(id);
+    // Only a problem we actually reported gets an all-clear: never at night, never for a quiet one.
+    const reported = state.sent.delete(id);
+    const meta = state.seen.get(id);
+    if (!opts.enabled || !reported || !meta || meta.push !== "always" || meta.tone !== "bad") continue;
+    if (opts.quiet || opts.now - state.lastSentAt < opts.gap) continue;
+    state.lastSentAt = opts.now;
+    out.push({ id: `clear:${id}`, title: "✅ Снова в норме", body: meta.title });
+  }
+
+  for (const a of alerts) state.seen.set(a.id, a);
+  return out;
 }
 
 // ---------- safety sources ----------

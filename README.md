@@ -2,7 +2,7 @@
 
 Мониторинг Мака, на котором работает BB-сервер. Страница в сайдбаре, CLI `bb mac-watch` и навык для агентов.
 
-Описание для пользователей лежит в [PLUGIN_OVERVIEW.md](PLUGIN_OVERVIEW.md).
+Описание для пользователей: [PLUGIN_OVERVIEW.md](PLUGIN_OVERVIEW.md) (English, для маркетплейса) и [PLUGIN_OVERVIEW.ru.md](PLUGIN_OVERVIEW.ru.md) (по-русски).
 
 ## Разработка
 

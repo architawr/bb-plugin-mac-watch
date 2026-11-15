@@ -13,7 +13,10 @@ power source and draw, network rate, and current alerts.
 
 - `snapshot` — the latest sample (`cpu`, `memory`, `disk`, `power`, `network`,
   `sleep`, `thermal`, `top.cpu`, `top.memory`, `host`), or `null` before the first one.
-- `alerts` — `[{id, tone: "warn" | "bad", title, detail}]`.
+- `alerts` — `[{id, tone: "warn" | "bad", title, detail, push: "always" | "day"}]`.
+  `push` is when it may reach the phone: `always` at any hour, `day` only
+  outside the quiet hours. Only real trouble is an alert at all: running on
+  battery (above 20%), a closed lid, a Mac free to sleep and high load are not.
 - `verdict` — `{tone, title, detail}`: will the Mac stay awake.
 
 Notes for answering:
@@ -33,8 +36,13 @@ Notes for answering:
   healthy is a few mV; `thermallyLimitedSec`; `lifetimeMaxC`), `disk.smart`,
   `panics` (kernel panic times, last 7 days). Swelling cannot be measured directly.
 - Alerts are pushed to the user's phone through the push-notifications plugin
-  after they hold for two samples, then at most every 30 min (bad) or 3 h (warn).
-  An unexpected reboot shows up as alert `restart` for 24 h.
+  after they hold for two samples. `day` alerts wait for the morning during the
+  quiet hours (setting `quiet`, default `23:00-09:00`, `off` disables them).
+  Repeats stop at one per 30 min for `always` and one per 6 h for `day`, with at
+  most one notification per 15 min overall. Only heat, a battery under 20%, memory
+  and disk pressure, SMART, a battery-controller fault, a kernel panic and an
+  unexpected reboot alert at all; battery power, a closed lid and high load do
+  not. An unexpected reboot shows up as alert `restart` for 24 h.
 - If the Mac dies or loses power and network, the plugin dies with it and cannot
   report it; the page then simply stops updating.
 

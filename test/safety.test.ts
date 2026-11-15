@@ -64,9 +64,32 @@ test("safety alerts fire on danger", () => {
   assert.deepEqual(ids(warm, [warm, warm, warm]), ["soc-hot:warn"]);
   assert.deepEqual(ids({ ...base, thermalPressure: 3 }), ["thermal-pressure:bad"]);
   assert.deepEqual(ids({ ...base, batterySafety: { ...base.batterySafety!, permanentFailure: 2 } }), ["battery-failure:bad"]);
-  assert.deepEqual(ids({ ...base, batterySafety: { ...base.batterySafety!, cellSpreadMv: 150 } }), ["battery-cells:warn"]);
-  const limited = { ...base, batterySafety: { ...base.batterySafety!, thermallyLimitedSec: 30 } };
-  assert.deepEqual(ids(limited, [base]), ["charge-hot:warn"]);
   assert.deepEqual(ids({ ...base, disk: { ...base.disk!, smart: "Failing" } }), ["smart:bad"]);
   assert.deepEqual(ids({ ...base, panics: [Date.now() - 3600_000] }), ["panic:warn"]);
+});
+
+const pushes = (s: Snapshot, recent: Snapshot[] = []) => deriveAlerts(s, recent).map((a) => `${a.id}:${a.push}`);
+
+test("alerts: a Mac on battery and with the lid shut says nothing", () => {
+  const battery = (percent: number): Snapshot => ({
+    ...base,
+    power: {
+      source: "battery", percent, charging: false, fullyCharged: false, minutesToEmpty: 900, minutesToFull: null,
+      batteryWatts: -2.6, systemWatts: 2.6, adapterWatts: null, adapterName: null, cycles: 213, healthPct: 95, temperatureC: 30,
+    },
+  });
+  assert.deepEqual(pushes(battery(96)), []);
+  assert.deepEqual(pushes(battery(50)), []);
+  assert.deepEqual(pushes(battery(15)), ["on-battery:always"]);
+  const lid = { ...base, sleep: { ...base.sleep!, sleepDisabled: false, lidClosed: true } };
+  assert.deepEqual(pushes(lid), []);
+});
+
+test("alerts: heat and hardware faults still reach the phone at night", () => {
+  assert.deepEqual(pushes({ ...base, temps: { ...base.temps!, soc: 104 } }), ["soc-hot:always"]);
+  assert.deepEqual(pushes({ ...base, thermalPressure: 3 }), ["thermal-pressure:always"]);
+  assert.deepEqual(pushes({ ...base, batterySafety: { ...base.batterySafety!, permanentFailure: 2 } }), ["battery-failure:always"]);
+  const warm = { ...base, temps: { ...base.temps!, soc: 92 } };
+  assert.deepEqual(pushes(warm, [warm, warm, warm]), ["soc-hot:day"]);
+  assert.deepEqual(pushes({ ...base, disk: { ...base.disk!, free: 5e9 } }), ["disk:day"]);
 });

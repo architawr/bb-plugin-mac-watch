@@ -1,21 +1,25 @@
-Следите за Маком, на котором работает BB, откуда угодно, в том числе с телефона: нагрузка, память, диск, питание и уснёт ли он.
+## What you get
 
-## Что вы получите
+A **Mac Watch** page in the sidebar, built like the macOS system panel. Live charts of CPU, memory, network and power draw for the last 1, 6 or 24 hours.
 
-- Страницу **Mac Watch** в сайдбаре в стиле системной панели macOS. На ней живые графики CPU, памяти, сети и потребления за 1, 6 или 24 часа.
-- Давление памяти и её разбивку: приложения, wired, сжатая, кэш, своп.
-- Список приложений по памяти и CPU, с настоящими иконками.
-- Блок «Бодрствование»: закрыта ли крышка, запрещён ли сон системно и какие процессы держат Мак бодрым. Работает с любым keep-awake-приложением, потому что читает состояние самой macOS.
-- Питание: заряд, сколько ватт берёт Мак, мощность адаптера, здоровье батареи, циклы, температура.
-- Панель «Безопасность». Температура процессора, SSD и батареи (без root). Тепловое давление macOS. Признаки опасной батареи: неисправность по данным контроллера, состояние, разброс ячеек, ограничение зарядки из-за нагрева. SMART диска и kernel panic.
-- Пуш-уведомления на телефон о перегреве, проблемах с батареей, отключении от сети, внезапной перезагрузке и других предупреждениях. Без спама: повтор не чаще раза в 30 минут или 3 часа.
-- Кнопки «Погасить экран», «Усыпить» (с таймером пробуждения) и «Выключить».
-- Команду `bb mac-watch status [--json]` и навык для агентов.
+Memory pressure spread out: app, wired, compressed, cached and swap. App lists by memory and by CPU, with the real icons.
 
-## Как это работает
+A "Staying awake" block answers what keeps the machine up: is the lid closed, is sleep disabled system-wide, which processes hold a sleep assertion. It reads macOS itself, so any keep-awake app works, including one that only flips the system flag.
 
-Каждые 15 секунд плагин опрашивает штатные утилиты macOS: `vm_stat`, `sysctl`, `pmset`, `ioreg`, `netstat`, `ps`. Он не использует sudo и ничего не устанавливает. История за 24 часа хранится в хранилище BB с минутным разрешением.
+Power: charge, the watts the Mac draws right now, adapter wattage, battery health, cycles and temperature.
 
-## Ограничения
+A Security panel holds the temperature of the processor, SSD and battery, macOS thermal pressure, battery-controller faults, cell spread, charging limited by heat, disk SMART status and kernel panics.
 
-Сбор идёт, только пока работает BB. Если Мак выключится или пропадёт из сети, плагин не сможет об этом сообщить. Вздутие батареи напрямую не измерить, видны только ранние признаки. Только macOS на Apple Silicon.
+## Alerts
+
+Push notifications only for real trouble: overheating, battery under 20%, memory or disk running out, SMART, a battery-controller fault, a kernel panic, an unexpected reboot. Running on battery, a closed lid and high load never notify. In the quiet hours, 23:00-09:00 by default, only critical alerts arrive; the rest wait for the morning. A repeat alarm comes at most every 30 minutes, a warning every 6 hours, and at most one notification per 15 minutes.
+
+Power buttons: turn the display off, sleep with a wake timer, shut down.
+
+## How it works
+
+Every 15 seconds the plugin reads stock macOS tools: `vm_stat`, `sysctl`, `pmset`, `ioreg`, `netstat` and `ps`. No sudo, nothing installed. 24 hours of history stay in BB storage at one-minute resolution. Agents get `bb mac-watch status [--json]` and a skill that answers "is the Mac at home still awake".
+
+## Requirements
+
+macOS on Apple Silicon. Alerts go through the push-notifications plugin. Sleep, the wake timer and shutdown add a one-time sudoers rule for exactly three commands. Collection runs only while bb runs: if the Mac dies or leaves the network, the plugin goes with it and the page simply stops updating. Battery swelling cannot be measured directly; only the early signs are visible. The interface is in Russian.

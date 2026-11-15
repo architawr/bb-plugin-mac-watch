@@ -614,6 +614,7 @@ function AppsPanel({ top, limit = 6 }: { top: Snapshot["top"]; limit?: number })
 
 type SafetyStatus = {
   notify: boolean;
+  quiet: string;
   lastPush: { at: number; title: string; channels: string[] } | null;
 };
 
@@ -698,6 +699,10 @@ function NotifySection() {
         </button>
         {testing && testing !== "…" && <span className="mw-caption">{testing}</span>}
       </div>
+      <p className="mw-caption mw-caption-quiet">
+        {safety?.quiet ? `Тихие часы ${safety.quiet.replace("-", "–")}: ночью приходят только критичные уведомления, остальные — после 9 утра.` : "Тихие часы выключены: уведомления приходят круглосуточно."}
+        {" "}Приходят только тревоги: перегрев, батарея ниже 20%, память, диск, сбой накопителя или батареи.
+      </p>
     </Sub>
   );
 }

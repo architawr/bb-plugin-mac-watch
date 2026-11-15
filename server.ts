@@ -10,8 +10,8 @@ import { Collector } from "./collector";
 import { appIcon } from "./icons";
 import * as power from "./power";
 import {
-  awakeVerdict, deriveAlerts, downsample, formatBytes, formatDuration, formatRate, toPoint,
-  type Alert, type HistoryPoint, type Snapshot,
+  awakeVerdict, deriveAlerts, downsample, formatBytes, formatDuration, formatRate, inQuietHours, parseQuietHours,
+  planNotifications, toPoint, type Alert, type HistoryPoint, type NotifyState, type Snapshot,
 } from "./core";
 
 const INTERVAL_MS = 15_000;
@@ -52,6 +52,7 @@ export const rpcContract = defineRpcContract({
     input: z.null(),
     output: z.object({
       notify: z.boolean(),
+      quiet: z.string(),
       lastPush: z.custom<{ at: number; title: string; channels: string[] }>().nullable(),
     }),
   },
@@ -74,7 +75,9 @@ const pluginFile = (rel: string) => [`./${rel}`, `../${rel}`]
   .map((r) => decodeURIComponent(new URL(r, import.meta.url).pathname))
   .find((path) => existsSync(path)) ?? null;
 
-const COOLDOWN_MS = { warn: 3 * 3600_000, bad: 30 * 60_000 } as const;
+const COOLDOWN_MS = { always: 30 * 60_000, day: 6 * 3600_000 } as const;
+/** One notification per this gap at most, however many alerts come due at once. */
+const GLOBAL_GAP_MS = 15 * 60_000;
 const pushSchema = z.object({ ok: z.literal(true), channels: z.array(z.enum(["web", "desktop", "mobile"])) });
 
 export default async function plugin(bb: BbPluginApi) {
@@ -85,9 +88,16 @@ export default async function plugin(bb: BbPluginApi) {
       description: "Перегрев, батарея, отключение от сети, диск, внезапная перезагрузка. Через плагин уведомлений BB.",
       default: true,
     },
+    quiet: {
+      type: "string",
+      label: "Тихие часы",
+      description: "Когда приходят только критичные уведомления, например 23:00-09:00. Пусто или off — слать всё круглосуточно.",
+      default: "23:00-09:00",
+    },
   });
   let cfg = await settings.get();
   settings.onChange((next) => { cfg = next; });
+  bb.log.info(`notifications: ${cfg.notify ? "on" : "off"}, quiet hours: ${cfg.quiet || "off"}`);
 
   const collector = new Collector(pluginFile("helpers/temps.c"), (m) => bb.log.warn(m));
   let snapshot: Snapshot | null = null;
@@ -114,8 +124,13 @@ export default async function plugin(bb: BbPluginApi) {
   // ---- notifications ----
   let lastPush: { at: number; title: string; channels: string[] } | null =
     (await bb.storage.kv.get<{ at: number; title: string; channels: string[] }>("last-push")) ?? null;
-  const notified: Record<string, number> = (await bb.storage.kv.get<Record<string, number>>("notified")) ?? {};
-  const streak = new Map<string, number>();
+  const notifyState: NotifyState = {
+    streak: new Map(),
+    seen: new Map(),
+    notified: (await bb.storage.kv.get<Record<string, number>>("notified")) ?? {},
+    sent: new Set(),
+    lastSentAt: lastPush?.at ?? 0,
+  };
 
   async function push(title: string, body: string): Promise<string[]> {
     const { channels } = await bb.sdk.plugins.callRpc({
@@ -129,31 +144,21 @@ export default async function plugin(bb: BbPluginApi) {
     return channels;
   }
 
-  /** Push an alert once it holds for two samples; repeat after a cooldown; say when it clears. */
+  /** Send whatever the policy allows this tick and remember the cooldowns. */
   async function notifyAlerts(alerts: Alert[]) {
     const now = Date.now();
-    const live = new Set(alerts.map((a) => a.id));
-    for (const a of alerts) {
-      const n = (streak.get(a.id) ?? 0) + 1;
-      streak.set(a.id, n);
-      if (!cfg.notify || n < 2 || now - (notified[a.id] ?? 0) < COOLDOWN_MS[a.tone]) continue;
-      notified[a.id] = now;
-      await push(`${a.tone === "bad" ? "🔴" : "🟠"} ${a.title}`, a.detail).catch((e) => bb.log.warn(`push failed: ${e}`));
+    const batch = planNotifications(alerts, notifyState, {
+      now,
+      quiet: inQuietHours(new Date(now), parseQuietHours(cfg.quiet)),
+      enabled: cfg.notify,
+      cooldown: COOLDOWN_MS,
+      gap: GLOBAL_GAP_MS,
+    });
+    for (const n of batch) {
+      await push(n.title, n.body).catch((e) => bb.log.warn(`push failed: ${e}`));
     }
-    for (const [id, n] of streak) {
-      if (live.has(id)) continue;
-      streak.delete(id);
-      // Only serious problems and power cuts get an all-clear; flapping warnings stay quiet
-      // and keep their cooldown, so they cannot spam.
-      const meta = alertMeta.get(id);
-      if (cfg.notify && n >= 2 && notified[id] && (meta?.tone === "bad" || id === "on-battery")) {
-        await push("✅ Снова в норме", meta?.title ?? id).catch((e) => bb.log.warn(`push failed: ${e}`));
-      }
-    }
-    for (const a of alerts) alertMeta.set(a.id, { title: a.title, tone: a.tone });
-    await bb.storage.kv.set("notified", notified);
+    await bb.storage.kv.set("notified", notifyState.notified);
   }
-  const alertMeta = new Map<string, { title: string; tone: Alert["tone"] }>();
 
   // ---- unexpected restarts ----
   let restart: Alert | null = null;
@@ -167,6 +172,7 @@ export default async function plugin(bb: BbPluginApi) {
         restart = {
           id: "restart",
           tone: "warn",
+          push: "day",
           title: "Мак перезагрузился сам",
           detail: `Загрузка в ${new Date(bootAt).toLocaleString("ru-RU")}. Причиной может быть kernel panic, сбой питания или обновление macOS.`,
         };
@@ -244,6 +250,7 @@ export default async function plugin(bb: BbPluginApi) {
     },
     safety_status: async () => ({
       notify: cfg.notify,
+      quiet: cfg.quiet,
       lastPush,
     }),
     test_push: async () => ({
